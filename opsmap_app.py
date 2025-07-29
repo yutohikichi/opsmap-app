@@ -159,5 +159,5 @@ else:
         node = get_node_by_path(clicked_id.split("/"), tree)
         if isinstance(node, dict) and "業務" in node:
             url_param = urllib.parse.quote(clicked_id)
-            st.experimental_set_query_params(selected_node=url_param)
+            st.query_params[selected_node] = url_param
             st.rerun()
