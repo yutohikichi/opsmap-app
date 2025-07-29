@@ -5,9 +5,7 @@ import urllib.parse
 st.set_page_config(page_title="OpsMap", layout="wide")
 st.title("OpsMap™：組織構造 × 業務マッピング")
 
-# -----------------------
 # 初期データ
-# -----------------------
 if "tree_data" not in st.session_state:
     st.session_state.tree_data = {}
 
@@ -19,9 +17,7 @@ if "selected_node" not in st.session_state:
 
 tree = st.session_state.tree_data
 
-# -----------------------
 # ユーティリティ関数
-# -----------------------
 def flatten_tree(tree, prefix=""):
     flat = []
     for key, val in tree.items():
@@ -47,9 +43,7 @@ def delete_node(tree, path_list):
         if path_list[0] in tree:
             delete_node(tree[path_list[0]], path_list[1:])
 
-# -----------------------
 # ページ切り替えチェック
-# -----------------------
 selected_node = st.session_state.get("selected_node")
 
 if selected_node:
@@ -173,14 +167,12 @@ else:
                 hierarchical_direction=direction
             )
             
-            # key引数を削除してagraphを呼び出し
             return_value = agraph(nodes=nodes, edges=edges, config=config)
 
             # ノードクリック処理
             if return_value:
                 clicked_id = None
                 
-                # 複数の属性名を試す（streamlit-agraphのバージョンによって異なる）
                 if hasattr(return_value, 'clicked_node_id') and return_value.clicked_node_id:
                     clicked_id = return_value.clicked_node_id
                 elif hasattr(return_value, 'clicked') and return_value.clicked:
@@ -216,11 +208,8 @@ else:
             display_tree_list(tree)
     else:
         st.info("まず部署を追加してください。")
-        st.markdown("""
-        ### 使い方
-        1. 左のサイドバーから「部署の追加」で組織構造を作成
-        2. 「業務の追加」で各部署に業務を追加
-        3. マインドマップ上の業務（📝マーク）をクリックして詳細編集
-        """)
-
-        """)
+        help_text = """### 使い方
+1. 左のサイドバーから「部署の追加」で組織構造を作成
+2. 「業務の追加」で各部署に業務を追加
+3. マインドマップ上の業務（📝マーク）をクリックして詳細編集"""
+        st.markdown(help_text)
