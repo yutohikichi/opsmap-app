@@ -9,12 +9,7 @@ st.title("OpsMap™：組織構造 × 業務マッピング")
 # 初期データ
 # -----------------------
 if "tree_data" not in st.session_state:
-    st.session_state.tree_data = {
-        "統合本部": {
-            "統合管理部": {},
-            "統合人事部": {}
-        }
-    }
+    st.session_state.tree_data = {}
 
 tree = st.session_state.tree_data
 
@@ -74,12 +69,14 @@ if selected_node:
             node["時間目安"] = new_estimate
             st.success("✅ 保存しました。")
 
-        # 戻るボタン
-        st.markdown("""
+        st.markdown(
+            '''
             <br>
             <a href="javascript:history.back()">🔙 戻る</a> &nbsp;&nbsp;&nbsp;
             <a href="/">🏠 トップに戻る</a>
-        """, unsafe_allow_html=True)
+            ''',
+            unsafe_allow_html=True
+        )
 
 else:
     # -----------------------
