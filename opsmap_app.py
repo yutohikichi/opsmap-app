@@ -10,14 +10,12 @@ st.title("OpsMap™：組織構造 × 業務マッピング")
 if "tree_data" not in st.session_state:
     st.session_state.tree_data = {
         "統合本部": {
-            "統合管理部": {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0},
-            "統合人事部": {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
+            "統合管理部": {},
+            "統合人事部": {}
         }
     }
 
-
 tree = st.session_state.tree_data
-
 
 # -----------------------
 # ツリーの抽象 / 検索
@@ -42,7 +40,6 @@ def delete_node(tree, path_list):
     else:
         delete_node(tree[path_list[0]], path_list[1:])
 
-
 # -----------------------
 # サイドバー: 部署の追加 / 削除
 # -----------------------
@@ -53,7 +50,7 @@ if st.sidebar.button("部署を追加する", key="add_button"):
     if new_dept:
         parent = get_node_by_path(parent_path.split("/") if parent_path else [], tree)
         if isinstance(parent, dict):
-            parent[new_dept] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
+            parent[new_dept] = {}
             st.sidebar.success(f"部署「{new_dept}」を追加しました。")
 
 st.sidebar.subheader("🗑️ 部署の削除")
@@ -63,6 +60,18 @@ if st.sidebar.button("部署を削除する", key="delete_button"):
         delete_node(tree, delete_path.split("/"))
         st.sidebar.success(f"部署「{delete_path}」を削除しました。")
 
+# -----------------------
+# サイドバー: 業務の追加
+# -----------------------
+st.sidebar.subheader("📄 業務の追加")
+target_dept_path = st.sidebar.selectbox("業務を追加する部署を選択", flatten_tree(tree), key="task_add_target")
+new_task_name = st.sidebar.text_input("業務名", key="task_add_name")
+if st.sidebar.button("業務を追加する", key="task_add_button"):
+    if new_task_name:
+        dept_node = get_node_by_path(target_dept_path.split("/"), tree)
+        if isinstance(dept_node, dict):
+            dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
+            st.sidebar.success(f"業務「{new_task_name}」を追加しました。")
 
 # -----------------------
 # マインドマップ表示
