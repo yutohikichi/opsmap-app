@@ -1,5 +1,6 @@
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
+import urllib.parse
 
 st.set_page_config(page_title="OpsMap", layout="wide")
 st.title("OpsMap™：組織構造 × 業務マッピング")
@@ -88,7 +89,11 @@ def build_nodes_edges(tree, parent=None, path="", depth=0):
         shape = "box" if is_task_node else "diamond"
         size = 25 if is_task_node else 30
 
-        nodes.append(Node(id=full_path, label=label, shape=shape, size=size))
+        # クリック時にパラメータでページ遷移できるよう URL にパスをエンコード
+        url_param = urllib.parse.quote(full_path)
+        link_target = f"?selected_node={url_param}" if is_task_node else None
+
+        nodes.append(Node(id=full_path, label=label, shape=shape, size=size, link=link_target))
         if parent:
             edges.append(Edge(source=parent, target=full_path))
 
@@ -109,35 +114,35 @@ config = Config(
     clickToExpand=True,
     selectable=True
 )
-return_value = agraph(nodes=nodes, edges=edges, config=config)
+agraph(nodes=nodes, edges=edges, config=config)
 
 # -----------------------
-# ノードクリック時の業務編集
+# URL パラメータで利用
 # -----------------------
-if return_value and return_value.clicked_node_id:
-    clicked = return_value.clicked_node_id
+selected_node = st.query_params.get("selected_node")
+if selected_node:
+    clicked = urllib.parse.unquote(selected_node)
     node = get_node_by_path(clicked.split("/"), tree)
 
     if isinstance(node, dict) and "業務" in node:
-        with st.sidebar:
-            st.markdown(f"### 📝 編集対象：「{clicked}」")
+        st.subheader(f"📝 業務詳細ページ：「{clicked}」")
 
-            task = node.get("業務", "")
-            freq = node.get("頻度", "毎週")
-            imp = node.get("重要度", 3)
-            effort = node.get("工数", 0.0)
-            estimate = node.get("時間目安", 0.0)
+        task = node.get("業務", "")
+        freq = node.get("頻度", "毎週")
+        imp = node.get("重要度", 3)
+        effort = node.get("工数", 0.0)
+        estimate = node.get("時間目安", 0.0)
 
-            new_task = st.text_area("業務内容", value=task, height=150)
-            new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], index=["毎日", "毎週", "毎月", "その他"].index(freq))
-            new_imp = st.slider("重要度 (1〜5)", 1, 5, value=imp)
-            new_effort = st.number_input("工数 (時間/週)", min_value=0.0, value=effort, step=0.5)
-            new_estimate = st.number_input("作業時間目安 (分/タスク)", min_value=0.0, value=estimate, step=5.0)
+        new_task = st.text_area("業務内容", value=task, height=150)
+        new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], index=["毎日", "毎週", "毎月", "その他"].index(freq))
+        new_imp = st.slider("重要度 (1〜5)", 1, 5, value=imp)
+        new_effort = st.number_input("工数 (時間/週)", min_value=0.0, value=effort, step=0.5)
+        new_estimate = st.number_input("作業時間目安 (分/タスク)", min_value=0.0, value=estimate, step=5.0)
 
-            if st.button("保存（サイドバー）", key=f"save_sidebar_{clicked}"):
-                node["業務"] = new_task
-                node["頻度"] = new_freq
-                node["重要度"] = new_imp
-                node["工数"] = new_effort
-                node["時間目安"] = new_estimate
-                st.success("✅ サイドバーから保存しました。")
+        if st.button("保存（業務詳細ページ）"):
+            node["業務"] = new_task
+            node["頻度"] = new_freq
+            node["重要度"] = new_imp
+            node["工数"] = new_effort
+            node["時間目安"] = new_estimate
+            st.success("✅ 保存しました。")
