@@ -11,6 +11,9 @@ st.title("OpsMap™：組織構造 × 業務マッピング")
 if "tree_data" not in st.session_state:
     st.session_state.tree_data = {}
 
+if "layout_direction" not in st.session_state:
+    st.session_state.layout_direction = "vertical"
+
 tree = st.session_state.tree_data
 
 # -----------------------
@@ -109,6 +112,10 @@ else:
                 dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
                 st.sidebar.success(f"業務「{new_task_name}」を追加しました。")
 
+    st.sidebar.subheader("🧭 表示形式")
+    layout_choice = st.sidebar.radio("マインドマップの方向", ["縦展開", "横展開"], index=0)
+    st.session_state.layout_direction = "vertical" if layout_choice == "縦展開" else "horizontal"
+
     # -----------------------
     # マインドマップ表示
     # -----------------------
@@ -136,7 +143,9 @@ else:
         return nodes, edges
 
     nodes, edges = build_nodes_edges(tree)
-    config = Config(width=1000, height=700, directed=True, physics=True, hierarchical=True)
+    hierarchical = True
+    direction = "UD" if st.session_state.layout_direction == "vertical" else "LR"
+    config = Config(width=1000, height=700, directed=True, physics=False, hierarchical=hierarchical, hierarchical_sort_method='directed', hierarchical_direction=direction)
     return_value = agraph(nodes=nodes, edges=edges, config=config)
 
     if return_value and return_value.clicked_node_id:
