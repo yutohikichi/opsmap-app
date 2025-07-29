@@ -83,21 +83,16 @@ def build_nodes_edges(tree, parent=None, path="", depth=0):
     for key, val in tree.items():
         full_path = f"{path}/{key}" if path else key
 
-        # --- ノード分類 ---
-        if isinstance(val, dict) and "業務" in val:
-            shape = "box"
-            label = f"📝{key}"
-            size = 25
-        else:
-            shape = "diamond"
-            label = f"◇{key}"
-            size = 30
+        is_task_node = isinstance(val, dict) and "業務" in val
+        label = f"📝{key}" if is_task_node else f"◇{key}"
+        shape = "box" if is_task_node else "diamond"
+        size = 25 if is_task_node else 30
 
         nodes.append(Node(id=full_path, label=label, shape=shape, size=size))
         if parent:
             edges.append(Edge(source=parent, target=full_path))
 
-        if isinstance(val, dict) and "業務" not in val:
+        if isinstance(val, dict):
             sn, se = build_nodes_edges(val, full_path, full_path, depth + 1)
             nodes.extend(sn)
             edges.extend(se)
