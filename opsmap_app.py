@@ -46,10 +46,10 @@ def delete_node(tree, path_list):
 # ページ切り替えチェック
 # -----------------------
 query_params = st.query_params
-selected_node = query_params.get("selected_node", [None])[0] if "selected_node" in query_params else None
+deep_link = query_params.get("selected_node", None)
+selected_node = deep_link[0] if deep_link else None
 
 if selected_node:
-    # 業務詳細ページ
     clicked = urllib.parse.unquote(selected_node)
     node = get_node_by_path(clicked.split("/"), tree)
 
@@ -76,18 +76,11 @@ if selected_node:
             node["時間目安"] = new_estimate
             st.success("✅ 保存しました。")
 
-        st.markdown(
-            '''
+        st.markdown('''
             <br>
             <a href="/">🔙 トップに戻る</a>
-            ''',
-            unsafe_allow_html=True
-        )
-
+        ''', unsafe_allow_html=True)
 else:
-    # -----------------------
-    # サイドバー: 部署と業務の追加/削除
-    # -----------------------
     st.sidebar.subheader("➕ 部署の追加")
     parent_path = st.sidebar.selectbox("親部署を選択", [""] + flatten_tree(tree), key="add_parent")
     new_dept = st.sidebar.text_input("新しい部署名を入力", key="add_name")
@@ -122,9 +115,6 @@ else:
     else:
         st.session_state.layout_direction = "horizontal"
 
-    # -----------------------
-    # マインドマップ表示
-    # -----------------------
     st.subheader("🧠 組織マップ")
 
     def build_nodes_edges(tree, parent=None, path=""):
@@ -159,5 +149,6 @@ else:
         node = get_node_by_path(clicked_id.split("/"), tree)
         if isinstance(node, dict) and "業務" in node:
             url_param = urllib.parse.quote(clicked_id)
-            st.query_params[selected_node] = url_param
+            st.query_params.clear()
+            st.query_params.update({"selected_node": url_param})
             st.rerun()
