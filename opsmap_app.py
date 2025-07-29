@@ -92,14 +92,11 @@ def build_nodes_edges(tree, parent=None, path="", depth=0):
     nodes, edges = [], []
     for key, val in tree.items():
         full_path = f"{path}/{key}" if path else key
-        # 形状を深度で切り替え：depth==0 → diamond, else → circle
         shape = "diamond" if depth == 0 else "circle"
-        label = key
         node_id = full_path
-        nodes.append(Node(id=node_id, label=label, size=30, shape=shape))
+        nodes.append(Node(id=node_id, label=key, size=30, shape=shape))
         if parent:
             edges.append(Edge(source=parent, target=node_id))
-        # 再帰で子ノードを追加
         if isinstance(val, dict):
             subnodes, subedges = build_nodes_edges(val, node_id, full_path, depth+1)
             nodes.extend(subnodes)
@@ -122,6 +119,13 @@ if return_value and return_value.clicked_node_id:
     st.markdown(f"### ✏️ 「{clicked}」の業務内容")
     node = get_node_by_path(clicked.split("/"), tree)
     if node is not None and isinstance(node, dict):
-        current = node.get("業務", "")
-        new_content = st.text_area("業務内容を入力してください", value=
+        current_content = node.get("業務", "")
+        new_content = st.text_area(
+            "業務内容を入力してください",
+            value=current_content,
+            key=f"main_area_{clicked}"
+        )
+        if st.button("保存", key=f"main_save_{clicked}"):
+            node["業務"] = new_content
+            st.success("保存しました。")
 
