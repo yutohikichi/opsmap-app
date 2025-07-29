@@ -102,15 +102,6 @@ def show_drawing_tool():
             bg_color = st.color_picker("背景色:", "#FFFFFF")
             
             canvas_name = st.text_input("キャンバス名:", "新しい描画")
-            
-            if st.button("💾 描画を保存"):
-                if canvas_name and "canvas_result" in locals():
-                    st.session_state.canvas_data[canvas_name] = {
-                        "json_data": canvas_result.json_data,
-                        "image_data": canvas_result.image_data,
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    st.success(f"描画「{canvas_name}」を保存しました！")
         
         with col2:
             # キャンバス
@@ -124,6 +115,21 @@ def show_drawing_tool():
                 drawing_mode=drawing_mode,
                 key="drawing_canvas",
             )
+        
+        # 保存ボタンを描画設定の下に移動
+        with col1:
+            if st.button("💾 描画を保存"):
+                if canvas_name and canvas_result and canvas_result.json_data:
+                    st.session_state.canvas_data[canvas_name] = {
+                        "json_data": canvas_result.json_data,
+                        "image_data": canvas_result.image_data,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    st.success(f"描画「{canvas_name}」を保存しました！")
+                elif not canvas_result or not canvas_result.json_data:
+                    st.warning("描画内容がありません。何か描いてから保存してください。")
+                else:
+                    st.warning("キャンバス名を入力してください。")
         
         # 保存済み描画一覧
         if st.session_state.canvas_data:
@@ -183,21 +189,45 @@ def show_free_page_creator():
             if st.button("➕ リンク追加"):
                 if link_title and link_url:
                     link_markdown = f"[{link_title}]({link_url})"
-                    page_content += f"\n\n{link_markdown}"
+                    # セッション状態を使ってページ内容を更新
+                    if "temp_page_content" not in st.session_state:
+                        st.session_state.temp_page_content = page_content
+                    st.session_state.temp_page_content += f"\n\n{link_markdown}"
+                    st.success(f"リンク「{link_title}」を追加しました！")
                     st.rerun()
         
+        # 一時的なページ内容を表示
+        if "temp_page_content" in st.session_state:
+            st.text_area("プレビュー:", value=st.session_state.temp_page_content, height=100, disabled=True)
+            final_content = st.session_state.temp_page_content
+        else:
+            final_content = page_content
+        
         # ページ保存
-        if st.button("💾 ページを保存"):
-            if page_title and page_content:
-                page_id = f"page_{len(st.session_state.free_pages) + 1}"
-                st.session_state.free_pages[page_id] = {
-                    "title": page_title,
-                    "content": page_content,
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                st.success(f"ページ「{page_title}」を保存しました！")
-                st.session_state.current_page = f"view_page_{page_id}"
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💾 ページを保存"):
+                if page_title and final_content:
+                    page_id = f"page_{len(st.session_state.free_pages) + 1}"
+                    st.session_state.free_pages[page_id] = {
+                        "title": page_title,
+                        "content": final_content,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                    st.success(f"ページ「{page_title}」を保存しました！")
+                    # 一時的なコンテンツをクリア
+                    if "temp_page_content" in st.session_state:
+                        del st.session_state.temp_page_content
+                    st.session_state.current_page = f"view_page_{page_id}"
+                    st.rerun()
+                else:
+                    st.warning("ページタイトルと内容を入力してください。")
+        
+        with col2:
+            if st.button("🗑️ 内容をクリア"):
+                if "temp_page_content" in st.session_state:
+                    del st.session_state.temp_page_content
                 st.rerun()
     
     # 既存ページ一覧
@@ -273,6 +303,7 @@ def show_free_page_editor(page_id):
                 if link_title and link_url:
                     link_markdown = f"[{link_title}]({link_url})"
                     new_content += f"\n\n{link_markdown}"
+                    st.success(f"リンク「{link_title}」を追加しました！")
                     st.rerun()
         
         # 保存・キャンセルボタン
@@ -424,6 +455,3 @@ elif current_page.startswith("edit_page_"):
 else:
     show_main_page()
 
-
-
-ライブ
