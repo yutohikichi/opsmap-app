@@ -1,20 +1,27 @@
-
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
 
 st.set_page_config(page_title="OpsMap", layout="wide")
 st.title("OpsMap™：組織構造 × 業務マッピング")
 
+# -----------------------
+# 初期データ
+# -----------------------
 if "tree_data" not in st.session_state:
     st.session_state.tree_data = {
-        "経営本部": {
-            "経理部": {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0},
-            "人事部": {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
+        "統合本部": {
+            "統合管理部": {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0},
+            "統合人事部": {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
         }
     }
 
+
 tree = st.session_state.tree_data
 
+
+# -----------------------
+# ツリーの抽象 / 検索
+# -----------------------
 def flatten_tree(tree, prefix=""):
     flat = []
     for key, val in tree.items():
@@ -35,6 +42,10 @@ def delete_node(tree, path_list):
     else:
         delete_node(tree[path_list[0]], path_list[1:])
 
+
+# -----------------------
+# サイドバー: 部署の追加 / 削除
+# -----------------------
 st.sidebar.subheader("➕ 部署の追加")
 parent_path = st.sidebar.selectbox("親部署を選択", [""] + flatten_tree(tree), key="add_parent")
 new_dept = st.sidebar.text_input("新しい部署名を入力", key="add_name")
@@ -52,30 +63,58 @@ if st.sidebar.button("部署を削除する", key="delete_button"):
         delete_node(tree, delete_path.split("/"))
         st.sidebar.success(f"部署「{delete_path}」を削除しました。")
 
+
+# -----------------------
+# マインドマップ表示
+# -----------------------
 st.subheader("🧠 組織マップ")
 
 def build_nodes_edges(tree, parent=None, path="", depth=0):
     nodes, edges = [], []
     for key, val in tree.items():
         full_path = f"{path}/{key}" if path else key
-        shape = "diamond" if depth == 0 else "circle"
-        label = f"◇{key}" if shape == "diamond" else f"○{key}"
-        nodes.append(Node(id=full_path, label=label, size=30, shape=shape))
+
+        # --- ノード分類 ---
+        if isinstance(val, dict) and "業務" in val:
+            shape = "box"
+            label = f"📝{key}"
+            size = 25
+        else:
+            shape = "diamond"
+            label = f"◇{key}"
+            size = 30
+
+        nodes.append(Node(id=full_path, label=label, shape=shape, size=size))
         if parent:
             edges.append(Edge(source=parent, target=full_path))
-        if isinstance(val, dict):
+
+        if isinstance(val, dict) and "業務" not in val:
             sn, se = build_nodes_edges(val, full_path, full_path, depth + 1)
-            nodes.extend(sn); edges.extend(se)
+            nodes.extend(sn)
+            edges.extend(se)
+
     return nodes, edges
 
 nodes, edges = build_nodes_edges(tree)
-config = Config(width=1000, height=700, directed=True, physics=True, hierarchical=True)
+config = Config(
+    width=1000,
+    height=700,
+    directed=True,
+    physics=True,
+    hierarchical=True,
+    clickToExpand=True,
+    selectable=True
+)
 return_value = agraph(nodes=nodes, edges=edges, config=config)
+
+# -----------------------
+# ノードクリック時の業務編集
+# -----------------------
 if return_value and return_value.clicked_node_id:
     clicked = return_value.clicked_node_id
     node = get_node_by_path(clicked.split("/"), tree)
 
-    if isinstance(node, dict):
+    if isinstance(node, dict) and "業務" in node:
         with st.sidebar:
             st.markdown(f"### 📝 編集対象：「{clicked}」")
 
@@ -86,8 +125,7 @@ if return_value and return_value.clicked_node_id:
             estimate = node.get("時間目安", 0.0)
 
             new_task = st.text_area("業務内容", value=task, height=150)
-            new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"],
-                                    index=["毎日", "毎週", "毎月", "その他"].index(freq))
+            new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], index=["毎日", "毎週", "毎月", "その他"].index(freq))
             new_imp = st.slider("重要度 (1〜5)", 1, 5, value=imp)
             new_effort = st.number_input("工数 (時間/週)", min_value=0.0, value=effort, step=0.5)
             new_estimate = st.number_input("作業時間目安 (分/タスク)", min_value=0.0, value=estimate, step=5.0)
