@@ -139,7 +139,7 @@ else:
     nodes, edges = build_nodes_edges(tree)
     hierarchical = True
     direction = "UD" if st.session_state.layout_direction == "vertical" else "LR"
-    config = Config(width=1000, height=700, directed=True, physics=False, hierarchical=hierarchical, hierarchical_sort_method='directed', hierarchical_direction=direction)
+    config = Config(width=1000, height=700, directed=True, physics=False, hierarchical=hierarchical, hierarchical_sort_method="directed", hierarchical_direction=direction)
     return_value = agraph(nodes=nodes, edges=edges, config=config)
 
     if return_value and return_value.clicked_node_id:
@@ -148,3 +148,4 @@ else:
         if isinstance(node, dict) and "業務" in node:
             st.session_state.selected_node = clicked_id
             st.rerun()
+
