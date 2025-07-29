@@ -14,6 +14,9 @@ if "tree_data" not in st.session_state:
 if "layout_direction" not in st.session_state:
     st.session_state.layout_direction = "vertical"
 
+if "last_clicked" not in st.session_state:
+    st.session_state.last_clicked = None
+
 tree = st.session_state.tree_data
 
 # -----------------------
@@ -24,7 +27,7 @@ def flatten_tree(tree, prefix=""):
     for key, val in tree.items():
         path = f"{prefix}/{key}" if prefix else key
         flat.append(path)
-        if isinstance(val, dict):
+        if isinstance(val, dict) and not ("業務" in val):
             flat.extend(flatten_tree(val, path))
     return flat
 
@@ -114,7 +117,10 @@ else:
 
     st.sidebar.subheader("🧭 表示形式")
     layout_choice = st.sidebar.radio("マインドマップの方向", ["縦展開", "横展開"], index=0)
-    st.session_state.layout_direction = "vertical" if layout_choice == "縦展開" else "horizontal"
+    if layout_choice == "縦展開":
+        st.session_state.layout_direction = "vertical"
+    else:
+        st.session_state.layout_direction = "horizontal"
 
     # -----------------------
     # マインドマップ表示
@@ -135,7 +141,7 @@ else:
             if parent:
                 edges.append(Edge(source=parent, target=full_path))
 
-            if isinstance(val, dict):
+            if isinstance(val, dict) and not ("業務" in val):
                 sn, se = build_nodes_edges(val, full_path)
                 nodes.extend(sn)
                 edges.extend(se)
