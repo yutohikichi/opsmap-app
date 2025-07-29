@@ -46,8 +46,7 @@ def delete_node(tree, path_list):
 # ページ切り替えチェック
 # -----------------------
 query_params = st.query_params
-deep_link = query_params.get("selected_node", None)
-selected_node = deep_link[0] if deep_link else None
+selected_node = query_params.get("selected_node", None)
 
 if selected_node:
     clicked = urllib.parse.unquote(selected_node)
