@@ -1,5 +1,4 @@
 import streamlit as st
-from streamlit_agraph import agraph, Node, Edge, Config
 import urllib.parse
 
 st.set_page_config(page_title="OpsMap", layout="wide")
@@ -116,100 +115,88 @@ else:
                         st.success(f"業務「{new_task_name}」を追加しました。")
                         st.rerun()
 
-        st.subheader("🧭 表示形式")
-        layout_choice = st.radio("マインドマップの方向", ["縦展開", "横展開"], 
-                               index=0 if st.session_state.layout_direction == "vertical" else 1,
-                               key="layout_radio")
-        
-        # レイアウト変更の処理
-        new_direction = "vertical" if layout_choice == "縦展開" else "horizontal"
-        if new_direction != st.session_state.layout_direction:
-            st.session_state.layout_direction = new_direction
-            st.rerun()
+    st.subheader("🧠 組織マップ（ツリー表示）")
 
-    st.subheader("🧠 組織マップ")
-
-    def build_nodes_edges(tree, parent=None, path=""):
-        nodes, edges = [], []
+    def display_tree_interactive(tree, level=0, path=""):
         for key, val in tree.items():
-            full_path = f"{path}/{key}" if path else key
-
-            is_task_node = isinstance(val, dict) and "業務" in val
-            label = f"📝{key}" if is_task_node else f"◇{key}"
-            shape = "box" if is_task_node else "diamond"
-            size = 25 if is_task_node else 30
-            color = "#FFE4B5" if is_task_node else "#87CEEB"
-
-            nodes.append(Node(id=full_path, label=label, shape=shape, size=size, color=color))
-            if parent:
-                edges.append(Edge(source=parent, target=full_path))
-
-            if isinstance(val, dict) and not ("業務" in val):
-                sub_nodes, sub_edges = build_nodes_edges(val, full_path, full_path)
-                nodes.extend(sub_nodes)
-                edges.extend(sub_edges)
-
-        return nodes, edges
+            current_path = f"{path}/{key}" if path else key
+            indent = "　" * level
+            
+            if isinstance(val, dict) and "業務" in val:
+                # 業務ノード - クリック可能なボタン
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    if st.button(f"📝 {key}", key=f"task_{current_path.replace('/', '_')}", help="クリックして詳細編集"):
+                        st.session_state.selected_node = current_path
+                        st.rerun()
+                with col2:
+                    task_content = val.get("業務", "未設定")
+                    freq = val.get("頻度", "毎週")
+                    imp = val.get("重要度", 3)
+                    st.write(f"{indent}業務内容: {task_content[:50]}{'...' if len(task_content) > 50 else ''}")
+                    st.write(f"{indent}頻度: {freq}, 重要度: {imp}")
+            else:
+                # 部署ノード
+                st.write(f"{indent}◇ **{key}**")
+                if isinstance(val, dict):
+                    display_tree_interactive(val, level + 1, current_path)
 
     if tree:
+        display_tree_interactive(tree)
+        
+        # 追加でグラフィカル表示も試す（オプション）
+        st.subheader("📊 グラフィカル表示（実験的）")
+        
         try:
+            from streamlit_agraph import agraph, Node, Edge, Config
+            
+            def build_nodes_edges(tree, parent=None, path=""):
+                nodes, edges = [], []
+                for key, val in tree.items():
+                    full_path = f"{path}/{key}" if path else key
+
+                    is_task_node = isinstance(val, dict) and "業務" in val
+                    label = f"📝{key}" if is_task_node else f"◇{key}"
+                    shape = "box" if is_task_node else "diamond"
+                    size = 25 if is_task_node else 30
+                    color = "#FFE4B5" if is_task_node else "#87CEEB"
+
+                    nodes.append(Node(id=full_path, label=label, shape=shape, size=size, color=color))
+                    if parent:
+                        edges.append(Edge(source=parent, target=full_path))
+
+                    if isinstance(val, dict) and not ("業務" in val):
+                        sub_nodes, sub_edges = build_nodes_edges(val, full_path, full_path)
+                        nodes.extend(sub_nodes)
+                        edges.extend(sub_edges)
+
+                return nodes, edges
+
             nodes, edges = build_nodes_edges(tree)
-            hierarchical = True
             direction = "UD" if st.session_state.layout_direction == "vertical" else "LR"
             
             config = Config(
-                width=1000, 
-                height=700, 
+                width=800, 
+                height=500, 
                 directed=True, 
                 physics=False, 
-                hierarchical=hierarchical, 
+                hierarchical=True, 
                 hierarchical_sort_method="directed", 
                 hierarchical_direction=direction
             )
             
-            return_value = agraph(nodes=nodes, edges=edges, config=config)
-
-            # ノードクリック処理
-            if return_value:
-                clicked_id = None
-                
-                if hasattr(return_value, 'clicked_node_id') and return_value.clicked_node_id:
-                    clicked_id = return_value.clicked_node_id
-                elif hasattr(return_value, 'clicked') and return_value.clicked:
-                    clicked_id = return_value.clicked
-                elif hasattr(return_value, 'node_id') and return_value.node_id:
-                    clicked_id = return_value.node_id
-                
-                if clicked_id:
-                    node = get_node_by_path(clicked_id.split("/"), tree)
-                    if isinstance(node, dict) and "業務" in node:
-                        st.session_state.selected_node = clicked_id
-                        st.rerun()
-                        
+            # agraphを表示（クリック機能は無効化）
+            st.info("⚠️ グラフィカル表示ではクリック機能が無効です。上のツリー表示で業務をクリックしてください。")
+            agraph(nodes=nodes, edges=edges, config=config)
+            
         except Exception as e:
-            st.error(f"マインドマップの表示でエラーが発生しました: {str(e)}")
-            st.info("streamlit-agraphライブラリに問題がある可能性があります。")
+            st.warning(f"グラフィカル表示でエラーが発生しました: {str(e)}")
+            st.info("ツリー表示をご利用ください。")
             
-            # フォールバック表示
-            st.subheader("📋 組織構造（リスト表示）")
-            def display_tree_list(tree, level=0, path=""):
-                for key, val in tree.items():
-                    current_path = f"{path}/{key}" if path else key
-                    indent = "　" * level
-                    if isinstance(val, dict) and "業務" in val:
-                        if st.button(f"{indent}📝 {key}", key=f"list_{current_path.replace('/', '_')}"):
-                            st.session_state.selected_node = current_path
-                            st.rerun()
-                    else:
-                        st.write(f"{indent}◇ {key}")
-                        if isinstance(val, dict):
-                            display_tree_list(val, level + 1, current_path)
-            
-            display_tree_list(tree)
     else:
         st.info("まず部署を追加してください。")
         help_text = """### 使い方
 1. 左のサイドバーから「部署の追加」で組織構造を作成
 2. 「業務の追加」で各部署に業務を追加
-3. マインドマップ上の業務（📝マーク）をクリックして詳細編集"""
+3. ツリー表示の業務（📝ボタン）をクリックして詳細編集"""
         st.markdown(help_text)
