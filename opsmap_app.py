@@ -45,8 +45,8 @@ def delete_node(tree, path_list):
 # -----------------------
 # ページ切り替えチェック
 # -----------------------
-query_params = st.experimental_get_query_params()
-selected_node = query_params.get("selected_node", [None])[0]
+query_params = st.query_params
+selected_node = query_params.get("selected_node", [None])[0] if "selected_node" in query_params else None
 
 if selected_node:
     # 業務詳細ページ
@@ -79,8 +79,7 @@ if selected_node:
         st.markdown(
             '''
             <br>
-            <a href="javascript:history.back()">🔙 戻る</a> &nbsp;&nbsp;&nbsp;
-            <a href="/">🏠 トップに戻る</a>
+            <a href="/">🔙 トップに戻る</a>
             ''',
             unsafe_allow_html=True
         )
