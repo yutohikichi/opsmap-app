@@ -5,7 +5,7 @@ from datetime import datetime
 import uuid
 
 st.set_page_config(page_title="OpsMap Enhanced", layout="wide")
-st.title("OpsMap™：組織構造 × 業務マッピング + セッション永続化")
+st.title("OpsMap™：組織構造 × 業務マッピング + マインドマップ表示")
 
 # セッション状態の初期化
 if "tree_data" not in st.session_state:
@@ -37,11 +37,18 @@ if "task_details" not in st.session_state:
 
 tree = st.session_state.tree_data
 
-# URLパラメータの処理
-query_params = st.experimental_get_query_params()
-if "task" in query_params:
-    task_id = query_params["task"][0]
-    st.session_state.current_page = f"task_detail_{task_id}"
+# URLパラメータの処理（新しいAPI使用）
+try:
+    query_params = st.query_params
+    if "task" in query_params:
+        task_id = query_params["task"]
+        st.session_state.current_page = f"task_detail_{task_id}"
+except AttributeError:
+    # 古いバージョンのStreamlitの場合
+    query_params = st.experimental_get_query_params()
+    if "task" in query_params:
+        task_id = query_params["task"][0]
+        st.session_state.current_page = f"task_detail_{task_id}"
 
 # ユーティリティ関数
 def flatten_tree(tree, prefix=""):
@@ -136,6 +143,126 @@ def get_all_task_files():
     
     return task_files
 
+def get_node_color(node_path):
+    """ノードの色を決定する"""
+    has_links = node_path in st.session_state.node_links
+    has_generated_url = node_path in st.session_state.generated_urls
+    
+    if has_generated_url:
+        return "#FFE4B5"  # 詳細ページ作成済み（薄いオレンジ）
+    elif has_links:
+        return "#E6F3FF"  # リンク付き（薄い青）
+    else:
+        return "#F0F0F0"  # デフォルト（薄いグレー）
+
+def show_mindmap():
+    """マインドマップを表示する"""
+    try:
+        from streamlit_agraph import agraph, Node, Edge, Config
+        
+        if not tree:
+            st.info("組織データがありません。まず部署や業務を追加してください。")
+            return
+        
+        nodes = []
+        edges = []
+        node_id = 0
+        
+        # ルートノード
+        nodes.append(Node(id="root", label="組織", color="#FFD700", size=30))
+        
+        def add_nodes_edges(tree_data, parent_id, level=1):
+            nonlocal node_id
+            for key, val in tree_data.items():
+                node_id += 1
+                current_id = f"node_{node_id}"
+                
+                # ノードパスを構築
+                if parent_id == "root":
+                    node_path = key
+                else:
+                    # 親のパスを取得
+                    parent_path = ""
+                    for existing_node in nodes:
+                        if existing_node.id == parent_id:
+                            parent_path = existing_node.label
+                            break
+                    node_path = f"{parent_path}/{key}" if parent_path != "組織" else key
+                
+                # ノードの色を決定
+                color = get_node_color(node_path)
+                
+                # ノードのサイズと形状を決定
+                if isinstance(val, dict) and "業務" in val:
+                    # 業務ノード
+                    size = 20
+                    shape = "box"
+                    label = f"📝 {key}"
+                else:
+                    # 部署ノード
+                    size = 25
+                    shape = "ellipse"
+                    label = f"📁 {key}"
+                
+                nodes.append(Node(
+                    id=current_id,
+                    label=label,
+                    color=color,
+                    size=size,
+                    shape=shape
+                ))
+                
+                edges.append(Edge(source=parent_id, target=current_id))
+                
+                # 子ノードがある場合は再帰的に追加
+                if isinstance(val, dict) and not ("業務" in val):
+                    add_nodes_edges(val, current_id, level + 1)
+        
+        add_nodes_edges(tree, "root")
+        
+        # マインドマップの設定
+        config = Config(
+            width=800,
+            height=600,
+            directed=True,
+            physics=True,
+            hierarchical=True if st.session_state.layout_direction == "vertical" else False,
+            nodeHighlightBehavior=True,
+            highlightColor="#F7A7A6",
+            collapsible=False
+        )
+        
+        # マインドマップを表示
+        st.subheader("🧠 組織マインドマップ")
+        
+        # レイアウト切り替え
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("🔄 レイアウト切り替え"):
+                st.session_state.layout_direction = "horizontal" if st.session_state.layout_direction == "vertical" else "vertical"
+                st.rerun()
+        
+        with col2:
+            st.write(f"現在のレイアウト: {'縦展開' if st.session_state.layout_direction == 'vertical' else '横展開'}")
+        
+        # 色の凡例
+        st.markdown("""
+        **色の説明:**
+        - 🟡 **ルート（組織）**: 組織全体
+        - 🟠 **詳細ページ作成済み**: 業務詳細ページが作成されている
+        - 🔵 **リンク付き**: 外部リンクが設定されている
+        - ⚪ **デフォルト**: 通常の部署・業務
+        """)
+        
+        # マインドマップを表示（クリック機能は無効）
+        agraph(nodes=nodes, edges=edges, config=config)
+        
+        st.info("💡 マインドマップは表示専用です。編集は下のツリー表示をご利用ください。")
+        
+    except ImportError:
+        st.warning("⚠️ streamlit-agraphがインストールされていません。マインドマップ表示をスキップします。")
+        st.info("代わりにツリー表示をご利用ください。")
+
 # 業務詳細ページの表示
 def show_task_detail_page(task_id):
     """固有URLを持つ業務詳細ページを表示"""
@@ -145,13 +272,34 @@ def show_task_detail_page(task_id):
         st.error(f"タスクID {task_id} のデータが見つかりません。")
         if st.button("🏠 メインページに戻る"):
             st.session_state.current_page = "main"
-            st.experimental_set_query_params()
+            try:
+                st.query_params.clear()
+            except AttributeError:
+                st.experimental_set_query_params()
             st.rerun()
         return
     
-    st.subheader(f"📝 業務詳細ページ：「{task_data['task_name']}」")
-    st.markdown(f"**部署:** {task_data['department_path']}")
-    st.markdown(f"**作成日:** {task_data['created_at']} | **更新日:** {task_data['updated_at']}")
+    # 重要度に応じた色分け
+    importance_colors = {
+        1: "#E8F5E8",  # 薄い緑
+        2: "#FFF8DC",  # 薄い黄色
+        3: "#FFE4B5",  # 薄いオレンジ
+        4: "#FFB6C1",  # 薄いピンク
+        5: "#FFA07A"   # 薄い赤
+    }
+    
+    importance = task_data.get("重要度", 3)
+    bg_color = importance_colors.get(importance, "#F0F0F0")
+    
+    # ページ全体の背景色を設定
+    st.markdown(f"""
+    <div style="background-color: {bg_color}; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+        <h2>📝 業務詳細ページ：「{task_data['task_name']}」</h2>
+        <p><strong>部署:</strong> {task_data['department_path']}</p>
+        <p><strong>作成日:</strong> {task_data['created_at']} | <strong>更新日:</strong> {task_data['updated_at']}</p>
+        <p><strong>重要度:</strong> {importance} / 5 ⭐</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # データ保存状況の表示
     st.info("💾 データはセッション内で保持されます（ブラウザを閉じるまで有効）")
@@ -281,7 +429,10 @@ def show_task_detail_page(task_id):
     with col1:
         if st.button("🏠 メインページに戻る", key="back_to_main"):
             st.session_state.current_page = "main"
-            st.experimental_set_query_params()
+            try:
+                st.query_params.clear()
+            except AttributeError:
+                st.experimental_set_query_params()
             st.rerun()
     with col2:
         if st.button("📋 全業務一覧", key="view_all_tasks"):
@@ -311,20 +462,42 @@ def show_task_list_page():
             for task_id in task_ids:
                 task_data = st.session_state.task_details.get(task_id)
                 if task_data:
-                    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                    # 重要度に応じた色分け
+                    importance = task_data.get("重要度", 3)
+                    importance_colors = {
+                        1: "#E8F5E8",  # 薄い緑
+                        2: "#FFF8DC",  # 薄い黄色
+                        3: "#FFE4B5",  # 薄いオレンジ
+                        4: "#FFB6C1",  # 薄いピンク
+                        5: "#FFA07A"   # 薄い赤
+                    }
+                    bg_color = importance_colors.get(importance, "#F0F0F0")
+                    
+                    st.markdown(f"""
+                    <div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                    """, unsafe_allow_html=True)
+                    
+                    col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
                     
                     with col1:
                         st.write(f"**{task_data['task_name']}**")
                     with col2:
                         st.write(f"更新: {task_data['updated_at']}")
                     with col3:
+                        st.write(f"重要度: {importance}")
+                    with col4:
                         if st.button("👁️ 表示", key=f"view_task_{task_id}"):
                             st.session_state.current_page = f"task_detail_{task_id}"
-                            st.experimental_set_query_params(task=task_id)
+                            try:
+                                st.query_params["task"] = task_id
+                            except AttributeError:
+                                st.experimental_set_query_params(task=task_id)
                             st.rerun()
-                    with col4:
+                    with col5:
                         if st.button("🔗 URL", key=f"copy_task_url_{task_id}"):
                             st.code(task_data['url'], language=None)
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 # ページナビゲーション
 def show_page_navigation():
@@ -334,7 +507,10 @@ def show_page_navigation():
     if st.sidebar.button("🏠 メインページ（組織マップ）"):
         st.session_state.current_page = "main"
         st.session_state.selected_node = None
-        st.experimental_set_query_params()
+        try:
+            st.query_params.clear()
+        except AttributeError:
+            st.experimental_set_query_params()
         st.rerun()
     
     if st.sidebar.button("📋 全業務一覧"):
@@ -388,7 +564,23 @@ def show_main_page():
         node = get_node_by_path(clicked.split("/"), tree)
 
         if isinstance(node, dict) and "業務" in node:
-            st.subheader(f"📝 業務：「{clicked}」")
+            # 重要度に応じた色分け
+            importance = node.get("重要度", 3)
+            importance_colors = {
+                1: "#E8F5E8",  # 薄い緑
+                2: "#FFF8DC",  # 薄い黄色
+                3: "#FFE4B5",  # 薄いオレンジ
+                4: "#FFB6C1",  # 薄いピンク
+                5: "#FFA07A"   # 薄い赤
+            }
+            bg_color = importance_colors.get(importance, "#F0F0F0")
+            
+            st.markdown(f"""
+            <div style="background-color: {bg_color}; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <h3>📝 業務：「{clicked}」</h3>
+                <p>重要度: {importance} / 5 ⭐</p>
+            </div>
+            """, unsafe_allow_html=True)
 
             # URL発行機能
             st.markdown("### 🔗 業務詳細ページの作成")
@@ -407,7 +599,10 @@ def show_main_page():
                     generated_url, task_id = generate_task_url(clicked)
                     st.success("業務詳細ページを作成しました！")
                     st.session_state.current_page = f"task_detail_{task_id}"
-                    st.experimental_set_query_params(task=task_id)
+                    try:
+                        st.query_params["task"] = task_id
+                    except AttributeError:
+                        st.experimental_set_query_params(task=task_id)
                     st.rerun()
             
             # 既存の詳細ページがある場合のアクセスボタン
@@ -415,7 +610,10 @@ def show_main_page():
                 task_id = st.session_state.generated_urls[clicked]["task_id"]
                 if st.button("👁️ 詳細ページを表示"):
                     st.session_state.current_page = f"task_detail_{task_id}"
-                    st.experimental_set_query_params(task=task_id)
+                    try:
+                        st.query_params["task"] = task_id
+                    except AttributeError:
+                        st.experimental_set_query_params(task=task_id)
                     st.rerun()
 
             # 簡易編集フォーム
@@ -444,6 +642,9 @@ def show_main_page():
                 st.rerun()
 
     else:
+        # マインドマップを表示
+        show_mindmap()
+        
         # サイドバーの設定（組織マップ用）
         with st.sidebar:
             st.subheader("➕ 部署の追加")
@@ -472,7 +673,7 @@ def show_main_page():
                             st.success(f"業務「{new_task_name}」を追加しました。")
                             st.rerun()
 
-        st.subheader("🧠 組織マップ")
+        st.subheader("🗂️ ツリー表示（編集用）")
 
         # ツリー表示（クリック機能付き）
         def display_tree_interactive(tree, level=0, path=""):
@@ -492,6 +693,21 @@ def show_main_page():
                     link_info += " 📄"
                 
                 if isinstance(val, dict) and "業務" in val:
+                    # 重要度に応じた色分け
+                    importance = val.get("重要度", 3)
+                    importance_colors = {
+                        1: "#E8F5E8",  # 薄い緑
+                        2: "#FFF8DC",  # 薄い黄色
+                        3: "#FFE4B5",  # 薄いオレンジ
+                        4: "#FFB6C1",  # 薄いピンク
+                        5: "#FFA07A"   # 薄い赤
+                    }
+                    bg_color = importance_colors.get(importance, "#F0F0F0")
+                    
+                    st.markdown(f"""
+                    <div style="background-color: {bg_color}; padding: 10px; border-radius: 5px; margin-bottom: 5px;">
+                    """, unsafe_allow_html=True)
+                    
                     # 業務ノード - クリック可能なボタン
                     col1, col2 = st.columns([1, 4])
                     with col1:
@@ -510,8 +726,13 @@ def show_main_page():
                             task_id = st.session_state.generated_urls[current_path]["task_id"]
                             if st.button(f"👁️ 詳細ページ", key=f"view_detail_{current_path.replace("/", "_")}"):
                                 st.session_state.current_page = f"task_detail_{task_id}"
-                                st.experimental_set_query_params(task=task_id)
+                                try:
+                                    st.query_params["task"] = task_id
+                                except AttributeError:
+                                    st.experimental_set_query_params(task=task_id)
                                 st.rerun()
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
                 else:
                     # 部署ノード
                     st.write(f"{indent}📁 **{key}**{link_info}")
@@ -528,6 +749,7 @@ def show_main_page():
 3. 業務をクリックして「📄 詳細ページ作成」で固有URLの詳細ページを作成
 4. 詳細ページではセッション内でデータの編集・保存が可能
 5. 「📋 全業務一覧」で部署別に整理された業務一覧を確認
+6. マインドマップで組織構造を視覚的に確認
 
 **注意**: データはセッション内でのみ保持されます（ブラウザを閉じるまで有効）"""
             st.markdown(help_text)
