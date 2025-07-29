@@ -45,7 +45,8 @@ def delete_node(tree, path_list):
 # -----------------------
 # ページ切り替えチェック
 # -----------------------
-selected_node = st.query_params.get("selected_node")
+query_params = st.experimental_get_query_params()
+selected_node = query_params.get("selected_node", [None])[0]
 
 if selected_node:
     # 業務詳細ページ
