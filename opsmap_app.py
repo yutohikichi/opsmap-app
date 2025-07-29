@@ -47,7 +47,7 @@ def delete_node(tree, path_list):
 selected_node = st.query_params.get("selected_node")
 
 if selected_node:
-    # 業務詳細ページのみ表示（他UI非表示）
+    # 業務詳細ページ
     clicked = urllib.parse.unquote(selected_node)
     node = get_node_by_path(clicked.split("/"), tree)
 
@@ -117,7 +117,7 @@ else:
     # -----------------------
     st.subheader("🧠 組織マップ")
 
-    def build_nodes_edges(tree, parent=None, path="", depth=0):
+    def build_nodes_edges(tree, parent=None, path=""):
         nodes, edges = [], []
         for key, val in tree.items():
             full_path = f"{path}/{key}" if path else key
@@ -127,28 +127,25 @@ else:
             shape = "box" if is_task_node else "diamond"
             size = 25 if is_task_node else 30
 
-            url_param = urllib.parse.quote(full_path)
-            link_target = f"?selected_node={url_param}" if is_task_node else None
-
-            nodes.append(Node(id=full_path, label=label, shape=shape, size=size, link=link_target))
+            nodes.append(Node(id=full_path, label=label, shape=shape, size=size))
             if parent:
                 edges.append(Edge(source=parent, target=full_path))
 
             if isinstance(val, dict):
-                sn, se = build_nodes_edges(val, full_path, full_path, depth + 1)
+                sn, se = build_nodes_edges(val, full_path)
                 nodes.extend(sn)
                 edges.extend(se)
 
         return nodes, edges
 
     nodes, edges = build_nodes_edges(tree)
-    config = Config(
-        width=1000,
-        height=700,
-        directed=True,
-        physics=True,
-        hierarchical=True,
-        clickToExpand=True,
-        selectable=True
-    )
-    agraph(nodes=nodes, edges=edges, config=config)
+    config = Config(width=1000, height=700, directed=True, physics=True, hierarchical=True)
+    return_value = agraph(nodes=nodes, edges=edges, config=config)
+
+    if return_value and return_value.clicked_node_id:
+        clicked_id = return_value.clicked_node_id
+        node = get_node_by_path(clicked_id.split("/"), tree)
+        if isinstance(node, dict) and "業務" in node:
+            url_param = urllib.parse.quote(clicked_id)
+            st.experimental_set_query_params(selected_node=url_param)
+            st.rerun()
