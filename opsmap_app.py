@@ -14,8 +14,8 @@ if "tree_data" not in st.session_state:
 if "layout_direction" not in st.session_state:
     st.session_state.layout_direction = "vertical"
 
-if "last_clicked" not in st.session_state:
-    st.session_state.last_clicked = None
+if "selected_node" not in st.session_state:
+    st.session_state.selected_node = None
 
 tree = st.session_state.tree_data
 
@@ -45,11 +45,10 @@ def delete_node(tree, path_list):
 # -----------------------
 # ページ切り替えチェック
 # -----------------------
-query_params = st.query_params
-selected_node = query_params.get("selected_node", None)
+selected_node = st.session_state.get("selected_node")
 
 if selected_node:
-    clicked = urllib.parse.unquote(selected_node)
+    clicked = selected_node
     node = get_node_by_path(clicked.split("/"), tree)
 
     if isinstance(node, dict) and "業務" in node:
@@ -75,10 +74,10 @@ if selected_node:
             node["時間目安"] = new_estimate
             st.success("✅ 保存しました。")
 
-        st.markdown('''
-            <br>
-            <a href="/">🔙 トップに戻る</a>
-        ''', unsafe_allow_html=True)
+        if st.button("🔙 トップに戻る"):
+            st.session_state.selected_node = None
+            st.rerun()
+
 else:
     st.sidebar.subheader("➕ 部署の追加")
     parent_path = st.sidebar.selectbox("親部署を選択", [""] + flatten_tree(tree), key="add_parent")
@@ -147,7 +146,5 @@ else:
         clicked_id = return_value.clicked_node_id
         node = get_node_by_path(clicked_id.split("/"), tree)
         if isinstance(node, dict) and "業務" in node:
-            url_param = urllib.parse.quote(clicked_id)
-            st.query_params.clear()
-            st.query_params.update({"selected_node": url_param})
+            st.session_state.selected_node = clicked_id
             st.rerun()
