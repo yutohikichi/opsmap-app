@@ -1,12 +1,100 @@
 import streamlit as st
 import urllib.parse
 import json
+import os
 from datetime import datetime
+import uuid
+import pickle
 
 st.set_page_config(page_title="OpsMap Enhanced", layout="wide")
-st.title("OpsMap™：組織構造 × 業務マッピング + リンク機能")
+st.title("OpsMap™：組織構造 × 業務マッピング + 永続化機能")
 
-# 初期データ
+# データ保存用ディレクトリの設定
+DATA_DIR = "/home/ubuntu/opsmap_data"
+TASKS_DIR = os.path.join(DATA_DIR, "tasks")
+MAIN_DATA_FILE = os.path.join(DATA_DIR, "main_data.pkl")
+
+# ディレクトリの作成
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(TASKS_DIR, exist_ok=True)
+
+# データの永続化関数
+def save_main_data():
+    """メインデータ（組織構造、リンクなど）を保存"""
+    main_data = {
+        "tree_data": st.session_state.tree_data,
+        "node_links": st.session_state.node_links,
+        "generated_urls": st.session_state.generated_urls,
+        "free_pages": st.session_state.free_pages,
+        "canvas_data": st.session_state.canvas_data
+    }
+    with open(MAIN_DATA_FILE, 'wb') as f:
+        pickle.dump(main_data, f)
+
+def load_main_data():
+    """メインデータを読み込み"""
+    if os.path.exists(MAIN_DATA_FILE):
+        try:
+            with open(MAIN_DATA_FILE, 'rb') as f:
+                main_data = pickle.load(f)
+                st.session_state.tree_data = main_data.get("tree_data", {})
+                st.session_state.node_links = main_data.get("node_links", {})
+                st.session_state.generated_urls = main_data.get("generated_urls", {})
+                st.session_state.free_pages = main_data.get("free_pages", {})
+                st.session_state.canvas_data = main_data.get("canvas_data", {})
+        except Exception as e:
+            st.error(f"データの読み込みに失敗しました: {e}")
+
+def save_task_data(task_id, task_data):
+    """業務詳細データを部署別フォルダに保存"""
+    # 部署パスからフォルダ構造を作成
+    dept_path = task_data.get("department_path", "")
+    if dept_path:
+        # スラッシュをアンダースコアに変換してフォルダ名として使用
+        folder_name = dept_path.replace("/", "_")
+        task_folder = os.path.join(TASKS_DIR, folder_name)
+        os.makedirs(task_folder, exist_ok=True)
+        file_path = os.path.join(task_folder, f"{task_id}.json")
+    else:
+        file_path = os.path.join(TASKS_DIR, f"{task_id}.json")
+    
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(task_data, f, ensure_ascii=False, indent=2)
+
+def load_task_data(task_id):
+    """業務詳細データを読み込み"""
+    # 全フォルダから該当するタスクIDを検索
+    for root, dirs, files in os.walk(TASKS_DIR):
+        for file in files:
+            if file == f"{task_id}.json":
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except Exception as e:
+                    st.error(f"タスクデータの読み込みに失敗しました: {e}")
+                    return None
+    return None
+
+def get_all_task_files():
+    """全ての業務詳細ファイルを部署別に取得"""
+    task_files = {}
+    for root, dirs, files in os.walk(TASKS_DIR):
+        for file in files:
+            if file.endswith('.json'):
+                task_id = file[:-5]  # .jsonを除去
+                dept_folder = os.path.basename(root)
+                if dept_folder not in task_files:
+                    task_files[dept_folder] = []
+                task_files[dept_folder].append(task_id)
+    return task_files
+
+# 初期データの読み込み
+if "data_loaded" not in st.session_state:
+    load_main_data()
+    st.session_state.data_loaded = True
+
+# セッション状態の初期化
 if "tree_data" not in st.session_state:
     st.session_state.tree_data = {}
 
@@ -28,7 +116,16 @@ if "canvas_data" not in st.session_state:
 if "node_links" not in st.session_state:
     st.session_state.node_links = {}
 
+if "generated_urls" not in st.session_state:
+    st.session_state.generated_urls = {}
+
 tree = st.session_state.tree_data
+
+# URLパラメータの処理
+query_params = st.experimental_get_query_params()
+if "task" in query_params:
+    task_id = query_params["task"][0]
+    st.session_state.current_page = f"task_detail_{task_id}"
 
 # ユーティリティ関数
 def flatten_tree(tree, prefix=""):
@@ -56,6 +153,247 @@ def delete_node(tree, path_list):
         if path_list[0] in tree:
             delete_node(tree[path_list[0]], path_list[1:])
 
+def generate_task_url(node_path):
+    """業務詳細ページの固有URLを生成する"""
+    # 一意のIDを生成
+    task_id = str(uuid.uuid4())[:8]
+    # 現在のStreamlitアプリのベースURLを想定
+    base_url = "http://localhost:8501"  # 実際の環境に合わせて変更
+    generated_url = f"{base_url}/?task={task_id}"
+    
+    # 業務詳細データを作成・保存
+    task_data = {
+        "task_id": task_id,
+        "node_path": node_path,
+        "department_path": "/".join(node_path.split("/")[:-1]),  # 最後の要素（業務名）を除く
+        "task_name": node_path.split("/")[-1],  # 最後の要素が業務名
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "url": generated_url,
+        "業務": "",
+        "頻度": "毎週",
+        "重要度": 3,
+        "工数": 0.0,
+        "時間目安": 0.0,
+        "メモ": "",
+        "関連リンク": []
+    }
+    
+    # 既存のノードデータがあれば引き継ぎ
+    node = get_node_by_path(node_path.split("/"), tree)
+    if isinstance(node, dict) and "業務" in node:
+        task_data.update({
+            "業務": node.get("業務", ""),
+            "頻度": node.get("頻度", "毎週"),
+            "重要度": node.get("重要度", 3),
+            "工数": node.get("工数", 0.0),
+            "時間目安": node.get("時間目安", 0.0)
+        })
+    
+    # データを保存
+    save_task_data(task_id, task_data)
+    
+    # 生成されたURLを保存
+    st.session_state.generated_urls[node_path] = {
+        "url": generated_url,
+        "task_id": task_id,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    # メインデータを保存
+    save_main_data()
+    
+    return generated_url, task_id
+
+# 業務詳細ページの表示
+def show_task_detail_page(task_id):
+    """固有URLを持つ業務詳細ページを表示"""
+    task_data = load_task_data(task_id)
+    
+    if not task_data:
+        st.error(f"タスクID {task_id} のデータが見つかりません。")
+        if st.button("🏠 メインページに戻る"):
+            st.session_state.current_page = "main"
+            st.experimental_set_query_params()
+            st.rerun()
+        return
+    
+    st.subheader(f"📝 業務詳細ページ：「{task_data['task_name']}」")
+    st.markdown(f"**部署:** {task_data['department_path']}")
+    st.markdown(f"**作成日:** {task_data['created_at']} | **更新日:** {task_data['updated_at']}")
+    
+    # URL情報の表示
+    with st.expander("🔗 このページのURL情報", expanded=False):
+        st.code(task_data['url'], language=None)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📋 URLをコピー", key="copy_task_url"):
+                st.success("URLがクリップボードにコピーされました！")
+                st.components.v1.html(f"""
+                <script>
+                navigator.clipboard.writeText('{task_data['url']}').then(function() {{
+                    console.log('URL copied to clipboard');
+                }});
+                </script>
+                """, height=0)
+        with col2:
+            if st.button("🔗 リンク管理に追加", key="add_to_links"):
+                # ノードリンクに自動追加
+                node_path = task_data['node_path']
+                if node_path not in st.session_state.node_links:
+                    st.session_state.node_links[node_path] = []
+                
+                st.session_state.node_links[node_path].append({
+                    "title": f"{task_data['task_name']}の詳細ページ",
+                    "url": task_data['url'],
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                save_main_data()
+                st.success("ノードリンクに追加しました！")
+    
+    # 業務詳細フォーム
+    with st.form("task_detail_form"):
+        st.markdown("### 📋 業務詳細")
+        
+        new_task = st.text_area("業務内容", value=task_data.get("業務", ""), height=150)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], 
+                                  index=["毎日", "毎週", "毎月", "その他"].index(task_data.get("頻度", "毎週")))
+            new_imp = st.slider("重要度 (1〜5)", 1, 5, value=task_data.get("重要度", 3))
+        
+        with col2:
+            new_effort = st.number_input("工数 (時間/週)", min_value=0.0, 
+                                       value=task_data.get("工数", 0.0), step=0.5)
+            new_estimate = st.number_input("作業時間目安 (分/タスク)", min_value=0.0, 
+                                         value=task_data.get("時間目安", 0.0), step=5.0)
+        
+        new_memo = st.text_area("メモ・備考", value=task_data.get("メモ", ""), height=100)
+        
+        submitted = st.form_submit_button("💾 保存")
+        
+        if submitted:
+            # データを更新
+            task_data.update({
+                "業務": new_task,
+                "頻度": new_freq,
+                "重要度": new_imp,
+                "工数": new_effort,
+                "時間目安": new_estimate,
+                "メモ": new_memo,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+            
+            # 元のノードデータも更新
+            node = get_node_by_path(task_data['node_path'].split("/"), tree)
+            if isinstance(node, dict):
+                node.update({
+                    "業務": new_task,
+                    "頻度": new_freq,
+                    "重要度": new_imp,
+                    "工数": new_effort,
+                    "時間目安": new_estimate
+                })
+            
+            # データを保存
+            save_task_data(task_id, task_data)
+            save_main_data()
+            
+            st.success("✅ 保存しました。")
+            st.rerun()
+    
+    # 関連リンク管理
+    st.markdown("### 🔗 関連リンク")
+    
+    # 新しいリンクの追加
+    with st.expander("➕ 関連リンクを追加"):
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            link_title = st.text_input("リンクタイトル:", key="task_link_title")
+        with col2:
+            link_url = st.text_input("URL:", key="task_link_url", placeholder="https://example.com")
+        with col3:
+            if st.button("➕ 追加", key="add_task_link"):
+                if link_title and link_url:
+                    if "関連リンク" not in task_data:
+                        task_data["関連リンク"] = []
+                    
+                    task_data["関連リンク"].append({
+                        "title": link_title,
+                        "url": link_url,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    
+                    save_task_data(task_id, task_data)
+                    st.success(f"リンク「{link_title}」を追加しました！")
+                    st.rerun()
+    
+    # 既存リンクの表示
+    if task_data.get("関連リンク"):
+        for i, link in enumerate(task_data["関連リンク"]):
+            col1, col2, col3 = st.columns([2, 3, 1])
+            with col1:
+                st.write(f"**{link['title']}**")
+            with col2:
+                st.markdown(f"[{link['url']}]({link['url']})")
+            with col3:
+                if st.button("🗑️", key=f"delete_task_link_{i}"):
+                    task_data["関連リンク"].pop(i)
+                    save_task_data(task_id, task_data)
+                    st.rerun()
+    
+    # ナビゲーションボタン
+    st.markdown("---")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🏠 メインページに戻る", key="back_to_main"):
+            st.session_state.current_page = "main"
+            st.experimental_set_query_params()
+            st.rerun()
+    with col2:
+        if st.button("📋 全業務一覧", key="view_all_tasks"):
+            st.session_state.current_page = "task_list"
+            st.rerun()
+    with col3:
+        if st.button("🔗 リンク管理", key="goto_link_management"):
+            st.session_state.current_page = "link_management"
+            st.rerun()
+
+# 全業務一覧ページ
+def show_task_list_page():
+    """部署別に整理された全業務一覧を表示"""
+    st.subheader("📋 全業務一覧（部署別）")
+    
+    task_files = get_all_task_files()
+    
+    if not task_files:
+        st.info("まだ業務詳細ページが作成されていません。")
+        return
+    
+    for dept_folder, task_ids in task_files.items():
+        # 部署名を表示（アンダースコアをスラッシュに戻す）
+        dept_name = dept_folder.replace("_", "/") if dept_folder != "tasks" else "未分類"
+        
+        with st.expander(f"📁 {dept_name} ({len(task_ids)}件)", expanded=True):
+            for task_id in task_ids:
+                task_data = load_task_data(task_id)
+                if task_data:
+                    col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                    
+                    with col1:
+                        st.write(f"**{task_data['task_name']}**")
+                    with col2:
+                        st.write(f"更新: {task_data['updated_at']}")
+                    with col3:
+                        if st.button("👁️ 表示", key=f"view_task_{task_id}"):
+                            st.session_state.current_page = f"task_detail_{task_id}"
+                            st.experimental_set_query_params(task=task_id)
+                            st.rerun()
+                    with col4:
+                        if st.button("🔗 URL", key=f"copy_task_url_{task_id}"):
+                            st.code(task_data['url'], language=None)
+
 # ページナビゲーション
 def show_page_navigation():
     st.sidebar.markdown("---")
@@ -64,6 +402,11 @@ def show_page_navigation():
     if st.sidebar.button("🏠 メインページ（組織マップ）"):
         st.session_state.current_page = "main"
         st.session_state.selected_node = None
+        st.experimental_set_query_params()
+        st.rerun()
+    
+    if st.sidebar.button("📋 全業務一覧"):
+        st.session_state.current_page = "task_list"
         st.rerun()
     
     if st.sidebar.button("🔗 ノードリンク管理"):
@@ -77,16 +420,8 @@ def show_page_navigation():
     if st.sidebar.button("📝 自由ページ作成"):
         st.session_state.current_page = "free_page"
         st.rerun()
-    
-    # 既存の自由ページ一覧
-    if st.session_state.free_pages:
-        st.sidebar.markdown("**作成済み自由ページ:**")
-        for page_id, page_data in st.session_state.free_pages.items():
-            if st.sidebar.button(f"📄 {page_data["title"]}", key=f"goto_{page_id}"):
-                st.session_state.current_page = f"view_page_{page_id}"
-                st.rerun()
 
-# ノードリンク管理機能
+# ノードリンク管理機能（簡略版）
 def show_link_management():
     st.subheader("🔗 ノードリンク管理")
     
@@ -107,60 +442,6 @@ def show_link_management():
         st.info("まず組織マップで部署や業務を作成してください。")
         return
     
-    # リンク追加・編集
-    with st.expander("➕ ノードにリンクを追加/編集", expanded=True):
-        selected_node = st.selectbox("ノードを選択:", all_nodes)
-        
-        # 既存リンク情報の取得
-        existing_links = st.session_state.node_links.get(selected_node, [])
-        
-        st.markdown(f"**選択ノード:** `{selected_node}`")
-        
-        # 新しいリンクの追加
-        st.markdown("**🔗 新しいリンクを追加**")
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            link_title = st.text_input("リンクタイトル:", key="new_link_title")
-        with col2:
-            link_url = st.text_input("URL:", key="new_link_url", 
-                                   placeholder="https://example.com")
-        with col3:
-            if st.button("➕ 追加"):
-                if link_title and link_url:
-                    if selected_node not in st.session_state.node_links:
-                        st.session_state.node_links[selected_node] = []
-                    
-                    st.session_state.node_links[selected_node].append({
-                        "title": link_title,
-                        "url": link_url,
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                    st.success(f"リンク「{link_title}」を追加しました！")
-                    st.rerun()
-                else:
-                    st.warning("リンクタイトルとURLを入力してください。")
-        
-        # 既存リンクの表示・管理
-        if existing_links:
-            st.markdown("**📋 既存のリンク**")
-            for i, link in enumerate(existing_links):
-                col1, col2, col3, col4 = st.columns([2, 3, 1, 1])
-                
-                with col1:
-                    st.write(f"**{link["title"]}**")
-                with col2:
-                    st.write(f"[{link["url"]}]({link["url"]})")
-                with col3:
-                    if st.button("🌐 開く", key=f"open_{selected_node}_{i}"):
-                        st.markdown(f"[🔗 {link["title"]}を新しいタブで開く]({link["url"]})")
-                with col4:
-                    if st.button("🗑️", key=f"delete_{selected_node}_{i}"):
-                        st.session_state.node_links[selected_node].pop(i)
-                        if not st.session_state.node_links[selected_node]:
-                            del st.session_state.node_links[selected_node]
-                        st.rerun()
-    
     # 全ノードのリンク一覧
     if st.session_state.node_links:
         st.subheader("📋 全ノードのリンク一覧")
@@ -170,236 +451,11 @@ def show_link_management():
                 for link in links:
                     col1, col2 = st.columns([1, 3])
                     with col1:
-                        st.write(f"**{link["title"]}**")
+                        st.write(f"**{link['title']}**")
                     with col2:
-                        st.markdown(f"[{link["url"]}]({link["url"]}) *(追加日: {link["created_at"]})*")
+                        st.markdown(f"[{link['url']}]({link['url']}) *(追加日: {link['created_at']})*")
 
-# 自由描画メモツール（ライブラリ不要版）
-def show_drawing_tool():
-    st.subheader("🎨 自由描画メモツール")
-    
-    st.info("💡 このツールでは、描画のアイデアやスケッチの説明をテキストで記録できます。")
-    
-    # 描画メモ作成
-    with st.expander("➕ 新しい描画メモを作成", expanded=True):
-        memo_name = st.text_input("描画メモ名:", "新しい描画アイデア")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**📝 描画内容・アイデア**")
-            drawing_description = st.text_area(
-                "描画の内容や構想を記述:", 
-                height=200,
-                placeholder="例：\n- 組織図の改善案\n- プロセスフローの設計\n- UI/UXのワイヤーフレーム\n- システム構成図のアイデア"
-            )
-        
-        with col2:
-            st.markdown("**🎯 目的・用途**")
-            purpose = st.text_area(
-                "この描画の目的や用途:",
-                height=100,
-                placeholder="例：会議での説明用、提案書への添付、チーム共有など"
-            )
-            
-            st.markdown("**🏷️ タグ・カテゴリ**")
-            tags = st.text_input(
-                "タグ（カンマ区切り）:",
-                placeholder="例：組織図,プロセス,UI設計"
-            )
-        
-        if st.button("💾 描画メモを保存"):
-            if memo_name and drawing_description:
-                st.session_state.canvas_data[memo_name] = {
-                    "description": drawing_description,
-                    "purpose": purpose,
-                    "tags": tags,
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "type": "memo"
-                }
-                st.success(f"描画メモ「{memo_name}」を保存しました！")
-                st.rerun()
-            else:
-                st.warning("メモ名と描画内容を入力してください。")
-    
-    # 保存済み描画メモ一覧
-    if st.session_state.canvas_data:
-        st.subheader("💾 保存済み描画メモ")
-        
-        for name, data in st.session_state.canvas_data.items():
-            with st.expander(f"📊 {name} ({data["created_at"]})"):
-                st.markdown(f"**描画内容:**")
-                st.write(data["description"])
-                
-                if data.get("purpose"):
-                    st.markdown(f"**目的:** {data["purpose"]}")
-                
-                if data.get("tags"):
-                    st.markdown(f"**タグ:** {data["tags"]}")
-                
-                if st.button(f"🗑️ 削除", key=f"del_memo_{name}"):
-                    del st.session_state.canvas_data[name]
-                    st.rerun()
-
-# 自由ページ作成機能
-def show_free_page_creator():
-    st.subheader("📝 自由ページ作成")
-    
-    # 新規ページ作成
-    with st.expander("➕ 新しいページを作成", expanded=True):
-        page_title = st.text_input("ページタイトル:")
-        page_content = st.text_area("ページ内容:", height=200, 
-                                   help="Markdown記法が使用できます")
-        
-        # URL追加機能
-        st.markdown("**🔗 URLリンクの追加**")
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            link_title = st.text_input("リンクタイトル:", key="link_title")
-        with col2:
-            link_url = st.text_input("URL:", key="link_url", 
-                                   placeholder="https://example.com")
-        with col3:
-            if st.button("➕ リンク追加"):
-                if link_title and link_url:
-                    link_markdown = f"[{link_title}]({link_url})"
-                    # セッション状態を使ってページ内容を更新
-                    if "temp_page_content" not in st.session_state:
-                        st.session_state.temp_page_content = page_content
-                    st.session_state.temp_page_content += f"\n\n{link_markdown}"
-                    st.success(f"リンク「{link_title}」を追加しました！")
-                    st.rerun()
-        
-        # 一時的なページ内容を表示
-        if "temp_page_content" in st.session_state:
-            st.text_area("プレビュー:", value=st.session_state.temp_page_content, height=100, disabled=True)
-            final_content = st.session_state.temp_page_content
-        else:
-            final_content = page_content
-        
-        # ページ保存
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 ページを保存"):
-                if page_title and final_content:
-                    page_id = f"page_{len(st.session_state.free_pages) + 1}"
-                    st.session_state.free_pages[page_id] = {
-                        "title": page_title,
-                        "content": final_content,
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    st.success(f"ページ「{page_title}」を保存しました！")
-                    # 一時的なコンテンツをクリア
-                    if "temp_page_content" in st.session_state:
-                        del st.session_state.temp_page_content
-                    st.session_state.current_page = f"view_page_{page_id}"
-                    st.rerun()
-                else:
-                    st.warning("ページタイトルと内容を入力してください。")
-        
-        with col2:
-            if st.button("🗑️ 内容をクリア"):
-                if "temp_page_content" in st.session_state:
-                    del st.session_state.temp_page_content
-                st.rerun()
-    
-    # 既存ページ一覧
-    if st.session_state.free_pages:
-        st.subheader("📄 作成済みページ")
-        for page_id, page_data in st.session_state.free_pages.items():
-            with st.expander(f"📄 {page_data["title"]} ({page_data["created_at"]})"):
-                st.markdown(page_data["content"])
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if st.button(f"👁️ 表示", key=f"view_{page_id}"):
-                        st.session_state.current_page = f"view_page_{page_id}"
-                        st.rerun()
-                with col2:
-                    if st.button(f"✏️ 編集", key=f"edit_{page_id}"):
-                        st.session_state.current_page = f"edit_page_{page_id}"
-                        st.rerun()
-                with col3:
-                    if st.button(f"🗑️ 削除", key=f"delete_{page_id}"):
-                        del st.session_state.free_pages[page_id]
-                        st.rerun()
-
-# 自由ページ表示
-def show_free_page(page_id):
-    if page_id in st.session_state.free_pages:
-        page_data = st.session_state.free_pages[page_id]
-        
-        st.subheader(f"📄 {page_data["title"]}")
-        st.markdown(f"*作成日: {page_data["created_at"]} | 更新日: {page_data["updated_at"]}*")
-        
-        # ページ内容表示
-        st.markdown("---")
-        st.markdown(page_data["content"])
-        
-        # 操作ボタン
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("✏️ 編集"):
-                st.session_state.current_page = f"edit_page_{page_id}"
-                st.rerun()
-        with col2:
-            if st.button("🔙 ページ一覧に戻る"):
-                st.session_state.current_page = "free_page"
-                st.rerun()
-        with col3:
-            if st.button("🏠 メインに戻る"):
-                st.session_state.current_page = "main"
-                st.rerun()
-
-# 自由ページ編集
-def show_free_page_editor(page_id):
-    if page_id in st.session_state.free_pages:
-        page_data = st.session_state.free_pages[page_id]
-        
-        st.subheader(f"✏️ ページ編集: {page_data["title"]}")
-        
-        # 編集フォーム
-        new_title = st.text_input("ページタイトル:", value=page_data["title"])
-        new_content = st.text_area("ページ内容:", value=page_data["content"], height=300)
-        
-        # URL追加機能
-        st.markdown("**🔗 URLリンクの追加**")
-        col1, col2, col3 = st.columns([2, 2, 1])
-        
-        with col1:
-            link_title = st.text_input("リンクタイトル:", key=f"edit_link_title_{page_id}")
-        with col2:
-            link_url = st.text_input("URL:", key=f"edit_link_url_{page_id}", 
-                                   placeholder="https://example.com")
-        with col3:
-            if st.button("➕ リンク追加", key=f"add_link_{page_id}"):
-                if link_title and link_url:
-                    link_markdown = f"[{link_title}]({link_url})"
-                    new_content += f"\n\n{link_markdown}"
-                    st.success(f"リンク「{link_title}」を追加しました！")
-                    st.rerun()
-        
-        # 保存・キャンセルボタン
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 変更を保存"):
-                st.session_state.free_pages[page_id].update({
-                    "title": new_title,
-                    "content": new_content,
-                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                })
-                st.success("変更を保存しました！")
-                st.session_state.current_page = f"view_page_{page_id}"
-                st.rerun()
-        
-        with col2:
-            if st.button("❌ キャンセル"):
-                st.session_state.current_page = f"view_page_{page_id}"
-                st.rerun()
-
-# メインの組織マップ機能（リンク機能付き）
+# メインの組織マップ機能
 def show_main_page():
     selected_node = st.session_state.get("selected_node")
 
@@ -408,50 +464,61 @@ def show_main_page():
         node = get_node_by_path(clicked.split("/"), tree)
 
         if isinstance(node, dict) and "業務" in node:
-            st.subheader(f"📝 業務詳細ページ：「{clicked}」")
+            st.subheader(f"📝 業務：「{clicked}」")
 
-            # ノードのリンク表示
-            node_links = st.session_state.node_links.get(clicked, [])
-            if node_links:
-                st.markdown("**🔗 関連リンク:**")
-                cols = st.columns(min(len(node_links), 3))
-                for i, link in enumerate(node_links):
-                    with cols[i % 3]:
-                        st.markdown(f"[🌐 {link["title"]}]({link["url"]})")
+            # URL発行機能
+            st.markdown("### 🔗 業務詳細ページの作成")
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                if clicked in st.session_state.generated_urls:
+                    generated_data = st.session_state.generated_urls[clicked]
+                    st.info(f"✅ 業務詳細ページが作成済みです")
+                    st.code(generated_data["url"], language=None)
+                else:
+                    st.info("この業務の詳細ページを作成してください")
+            
+            with col2:
+                if st.button("📄 詳細ページ作成"):
+                    generated_url, task_id = generate_task_url(clicked)
+                    st.success("業務詳細ページを作成しました！")
+                    st.session_state.current_page = f"task_detail_{task_id}"
+                    st.experimental_set_query_params(task=task_id)
+                    st.rerun()
+            
+            # 既存の詳細ページがある場合のアクセスボタン
+            if clicked in st.session_state.generated_urls:
+                task_id = st.session_state.generated_urls[clicked]["task_id"]
+                if st.button("👁️ 詳細ページを表示"):
+                    st.session_state.current_page = f"task_detail_{task_id}"
+                    st.experimental_set_query_params(task=task_id)
+                    st.rerun()
 
+            # 簡易編集フォーム
+            st.markdown("### ⚡ 簡易編集")
             task = node.get("業務", "")
             freq = node.get("頻度", "毎週")
             imp = node.get("重要度", 3)
-            effort = node.get("工数", 0.0)
-            estimate = node.get("時間目安", 0.0)
 
-            with st.form("task_form"):
-                new_task = st.text_area("業務内容", value=task, height=150)
-                new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], index=["毎日", "毎週", "毎月", "その他"].index(freq))
+            with st.form("quick_edit_form"):
+                new_task = st.text_area("業務内容", value=task, height=100)
+                new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], 
+                                      index=["毎日", "毎週", "毎月", "その他"].index(freq))
                 new_imp = st.slider("重要度 (1〜5)", 1, 5, value=imp)
-                new_effort = st.number_input("工数 (時間/週)", min_value=0.0, value=effort, step=0.5)
-                new_estimate = st.number_input("作業時間目安 (分/タスク)", min_value=0.0, value=estimate, step=5.0)
                 
-                submitted = st.form_submit_button("保存（業務詳細ページ）")
+                submitted = st.form_submit_button("💾 簡易保存")
                 if submitted:
                     node["業務"] = new_task
                     node["頻度"] = new_freq
                     node["重要度"] = new_imp
-                    node["工数"] = new_effort
-                    node["時間目安"] = new_estimate
+                    save_main_data()
                     st.success("✅ 保存しました。")
 
-            # 修正後のボタン配置
-            st.markdown("--- # 修正後のボタン配置")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🔙 トップに戻る", key="back_to_top_main"):
-                    st.session_state.selected_node = None
-                    st.rerun()
-            with col2:
-                if st.button("🔗 リンクを管理", key="manage_links_main"):
-                    st.session_state.current_page = "link_management"
-                    st.rerun()
+            # ボタン配置
+            st.markdown("---")
+            if st.button("🔙 トップに戻る", key="back_to_top_main"):
+                st.session_state.selected_node = None
+                st.rerun()
 
     else:
         # サイドバーの設定（組織マップ用）
@@ -467,16 +534,9 @@ def show_main_page():
                         parent = tree
                     if isinstance(parent, dict):
                         parent[new_dept] = {}
+                        save_main_data()
                         st.success(f"部署「{new_dept}」を追加しました。")
                         st.rerun()
-
-            st.subheader("🗑️ 部署の削除")
-            delete_path = st.selectbox("削除したい部署を選択", [""] + flatten_tree(tree), key="del_select")
-            if st.button("部署を削除する", key="delete_button"):
-                if delete_path:
-                    delete_node(tree, delete_path.split("/"))
-                    st.success(f"部署「{delete_path}」を削除しました。")
-                    st.rerun()
 
             st.subheader("📄 業務の追加")
             if flatten_tree(tree):
@@ -487,86 +547,13 @@ def show_main_page():
                         dept_node = get_node_by_path(target_dept_path.split("/"), tree)
                         if isinstance(dept_node, dict):
                             dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
+                            save_main_data()
                             st.success(f"業務「{new_task_name}」を追加しました。")
                             st.rerun()
 
         st.subheader("🧠 組織マップ")
 
-        # マインドマップ表示（streamlit-agraph使用）
-        try:
-            from streamlit_agraph import agraph, Node, Edge, Config
-            
-            def build_nodes_edges(tree, parent=None, path=""):
-                nodes, edges = [], []
-                for key, val in tree.items():
-                    full_path = f"{path}/{key}" if path else key
-
-                    is_task_node = isinstance(val, dict) and "業務" in val
-                    
-                    # リンクがあるノードには🔗マークを追加
-                    has_links = full_path in st.session_state.node_links
-                    link_indicator = "🔗" if has_links else ""
-                    
-                    label = f"📝{key}{link_indicator}" if is_task_node else f"◇{key}{link_indicator}"
-                    shape = "box" if is_task_node else "diamond"
-                    size = 25 if is_task_node else 30
-                    color = "#FFE4B5" if is_task_node else "#87CEEB"
-                    
-                    # リンクがあるノードは色を変更
-                    if has_links:
-                        color = "#98FB98" if is_task_node else "#87CEFA"
-
-                    nodes.append(Node(id=full_path, label=label, shape=shape, size=size, color=color))
-                    if parent:
-                        edges.append(Edge(source=parent, target=full_path))
-
-                    if isinstance(val, dict) and not ("業務" in val):
-                        sub_nodes, sub_edges = build_nodes_edges(val, full_path, full_path)
-                        nodes.extend(sub_nodes)
-                        edges.extend(sub_edges)
-
-                return nodes, edges
-
-            if tree:
-                nodes, edges = build_nodes_edges(tree)
-                direction = "UD" if st.session_state.layout_direction == "vertical" else "LR"
-                
-                config = Config(
-                    width=800, 
-                    height=500, 
-                    directed=True, 
-                    physics=False, 
-                    hierarchical=True, 
-                    hierarchical_sort_method="directed", 
-                    hierarchical_direction=direction
-                )
-                
-                # agraphを表示
-                st.info("💡 マインドマップ上の🔗マークはリンクが設定されているノードを示します。ノードをクリックして詳細を確認してください。")
-                return_value = agraph(nodes=nodes, edges=edges, config=config)
-                
-                # ノードクリック処理
-                if return_value:
-                    clicked_node = None
-                    # 複数の属性名を試す
-                    for attr in ["clicked_node_id", "clicked", "node_id", "selected"]:
-                        if hasattr(return_value, attr):
-                            clicked_node = getattr(return_value, attr)
-                            break
-                        elif isinstance(return_value, dict) and attr in return_value:
-                            clicked_node = return_value[attr]
-                            break
-                    
-                    if clicked_node:
-                        st.session_state.selected_node = clicked_node
-                        st.rerun()
-                
-        except ImportError:
-            st.warning("streamlit-agraphがインストールされていないため、マインドマップ表示は利用できません。")
-
         # ツリー表示（クリック機能付き）
-        st.subheader("📋 組織ツリー（クリック可能）")
-
         def display_tree_interactive(tree, level=0, path=""):
             for key, val in tree.items():
                 current_path = f"{path}/{key}" if path else key
@@ -574,14 +561,20 @@ def show_main_page():
                 
                 # リンク情報の表示
                 has_links = current_path in st.session_state.node_links
+                has_generated_url = current_path in st.session_state.generated_urls
                 link_count = len(st.session_state.node_links.get(current_path, []))
-                link_info = f" 🔗({link_count})" if has_links else ""
+                
+                link_info = ""
+                if has_links:
+                    link_info += f" 🔗({link_count})"
+                if has_generated_url:
+                    link_info += " 📄"
                 
                 if isinstance(val, dict) and "業務" in val:
                     # 業務ノード - クリック可能なボタン
                     col1, col2 = st.columns([1, 4])
                     with col1:
-                        if st.button(f"📝 {key}{link_info}", key=f"task_{current_path.replace("/", "_")}", help="クリックして詳細編集"):
+                        if st.button(f"📝 {key}{link_info}", key=f"task_{current_path.replace("/", "_")}", help="クリックして編集"):
                             st.session_state.selected_node = current_path
                             st.rerun()
                     with col2:
@@ -591,16 +584,16 @@ def show_main_page():
                         st.write(f"{indent}業務内容: {task_content[:50]}{"""...""" if len(task_content) > 50 else ""}")
                         st.write(f"{indent}頻度: {freq}, 重要度: {imp}")
                         
-                        # リンクの表示
-                        if has_links:
-                            links = st.session_state.node_links[current_path]
-                            for link in links[:2]:  # 最大2つまで表示
-                                st.markdown(f"{indent}🔗 [{link["title"]}]({link["url"]})")
-                            if len(links) > 2:
-                                st.write(f"{indent}... 他{len(links)-2}個のリンク")
+                        # 詳細ページへのリンク
+                        if has_generated_url:
+                            task_id = st.session_state.generated_urls[current_path]["task_id"]
+                            if st.button(f"👁️ 詳細ページ", key=f"view_detail_{current_path.replace("/", "_")}"):
+                                st.session_state.current_page = f"task_detail_{task_id}"
+                                st.experimental_set_query_params(task=task_id)
+                                st.rerun()
                 else:
                     # 部署ノード
-                    st.write(f"{indent}◇ **{key}**{link_info}")
+                    st.write(f"{indent}📁 **{key}**{link_info}")
                     if isinstance(val, dict):
                         display_tree_interactive(val, level + 1, current_path)
 
@@ -611,8 +604,9 @@ def show_main_page():
             help_text = """### 使い方
 1. 左のサイドバーから「部署の追加」で組織構造を作成
 2. 「業務の追加」で各部署に業務を追加
-3. 「🔗 ノードリンク管理」でノードにリンクを追加
-4. ツリー表示の業務（📝ボタン）をクリックして詳細編集"""
+3. 業務をクリックして「📄 詳細ページ作成」で固有URLの詳細ページを作成
+4. 詳細ページでは永続化されたデータの編集・保存が可能
+5. 「📋 全業務一覧」で部署別に整理された業務一覧を確認"""
             st.markdown(help_text)
 
 # メイン処理
@@ -623,18 +617,13 @@ current_page = st.session_state.current_page
 
 if current_page == "main":
     show_main_page()
+elif current_page == "task_list":
+    show_task_list_page()
 elif current_page == "link_management":
     show_link_management()
-elif current_page == "drawing":
-    show_drawing_tool()
-elif current_page == "free_page":
-    show_free_page_creator()
-elif current_page.startswith("view_page_"):
-    page_id = current_page.replace("view_page_", "")
-    show_free_page(page_id)
-elif current_page.startswith("edit_page_"):
-    page_id = current_page.replace("edit_page_", "")
-    show_free_page_editor(page_id)
+elif current_page.startswith("task_detail_"):
+    task_id = current_page.replace("task_detail_", "")
+    show_task_detail_page(task_id)
 else:
     show_main_page()
 
