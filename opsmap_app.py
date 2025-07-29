@@ -1,11 +1,10 @@
+
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
 
-# ─── ページ設定 ───────────────────────────────
 st.set_page_config(page_title="OpsMap", layout="wide")
 st.title("OpsMap™：組織構造 × 業務マッピング")
 
-# ─── セッション初期化 ─────────────────────────
 if "tree_data" not in st.session_state:
     st.session_state.tree_data = {
         "経営本部": {
@@ -16,7 +15,6 @@ if "tree_data" not in st.session_state:
 
 tree = st.session_state.tree_data
 
-# ─── ヘルパー関数 ─────────────────────────────
 def flatten_tree(tree, prefix=""):
     flat = []
     for key, val in tree.items():
@@ -37,7 +35,6 @@ def delete_node(tree, path_list):
     else:
         delete_node(tree[path_list[0]], path_list[1:])
 
-# ─── サイドバー：部署追加・削除 ──────────────────
 st.sidebar.subheader("➕ 部署の追加")
 parent_path = st.sidebar.selectbox("親部署を選択", [""] + flatten_tree(tree), key="add_parent")
 new_dept = st.sidebar.text_input("新しい部署名を入力", key="add_name")
@@ -55,7 +52,6 @@ if st.sidebar.button("部署を削除する", key="delete_button"):
         delete_node(tree, delete_path.split("/"))
         st.sidebar.success(f"部署「{delete_path}」を削除しました。")
 
-# ─── マインドマップ可視化 ─────────────────────
 st.subheader("🧠 組織マップ")
 
 def build_nodes_edges(tree, parent=None, path="", depth=0):
@@ -76,21 +72,18 @@ nodes, edges = build_nodes_edges(tree)
 config = Config(width=1000, height=700, directed=True, physics=True, hierarchical=True)
 return_value = agraph(nodes=nodes, edges=edges, config=config)
 
-# ─── ノードクリック時に詳細表示 ──────────────────
 if return_value and return_value.clicked_node_id:
     clicked = return_value.clicked_node_id
     st.markdown(f"### ✏️ 「{clicked}」の業務詳細を編集")
 
     node = get_node_by_path(clicked.split("/"), tree)
     if isinstance(node, dict):
-        # 現在の値を取得
         task     = node.get("業務", "")
         freq     = node.get("頻度", "毎週")
         imp      = node.get("重要度", 3)
         effort   = node.get("工数", 0.0)
         estimate = node.get("時間目安", 0.0)
 
-        # 入力フォーム
         new_task     = st.text_area("業務内容", value=task, height=150)
         new_freq     = st.selectbox("頻度", ["毎日","毎週","毎月","その他"], index=["毎日","毎週","毎月","その他"].index(freq))
         new_imp      = st.slider("重要度 (1〜5)", 1, 5, value=imp)
@@ -104,5 +97,3 @@ if return_value and return_value.clicked_node_id:
             node["工数"] = new_effort
             node["時間目安"] = new_estimate
             st.success("業務内容を保存しました。")
-
-
