@@ -1,152 +1,11 @@
 import streamlit as st
 import urllib.parse
 import json
-import os
 from datetime import datetime
 import uuid
-import tempfile
-import shutil
 
 st.set_page_config(page_title="OpsMap Enhanced", layout="wide")
-st.title("OpsMap™：組織構造 × 業務マッピング + 永続化機能")
-
-# データ保存用ディレクトリの設定（権限エラーを回避）
-def get_data_directory():
-    """適切なデータディレクトリを取得"""
-    try:
-        # まず現在のディレクトリに作成を試行
-        current_dir = os.getcwd()
-        data_dir = os.path.join(current_dir, "opsmap_data")
-        os.makedirs(data_dir, exist_ok=True)
-        return data_dir
-    except PermissionError:
-        try:
-            # ホームディレクトリに作成を試行
-            home_dir = os.path.expanduser("~")
-            data_dir = os.path.join(home_dir, "opsmap_data")
-            os.makedirs(data_dir, exist_ok=True)
-            return data_dir
-        except PermissionError:
-            # 一時ディレクトリを使用
-            temp_dir = tempfile.gettempdir()
-            data_dir = os.path.join(temp_dir, "opsmap_data")
-            os.makedirs(data_dir, exist_ok=True)
-            return data_dir
-
-DATA_DIR = get_data_directory()
-TASKS_DIR = os.path.join(DATA_DIR, "tasks")
-MAIN_DATA_FILE = os.path.join(DATA_DIR, "main_data.json")
-
-# ディレクトリの作成
-try:
-    os.makedirs(TASKS_DIR, exist_ok=True)
-except PermissionError:
-    st.error("データ保存ディレクトリの作成に失敗しました。セッション内でのみデータが保持されます。")
-    DATA_DIR = None
-
-# データの永続化関数
-def save_main_data():
-    """メインデータ（組織構造、リンクなど）を保存"""
-    if DATA_DIR is None:
-        return
-    
-    try:
-        main_data = {
-            "tree_data": st.session_state.tree_data,
-            "node_links": st.session_state.node_links,
-            "generated_urls": st.session_state.generated_urls,
-            "free_pages": st.session_state.free_pages,
-            "canvas_data": st.session_state.canvas_data
-        }
-        with open(MAIN_DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(main_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.warning(f"データの保存に失敗しました: {e}")
-
-def load_main_data():
-    """メインデータを読み込み"""
-    if DATA_DIR is None or not os.path.exists(MAIN_DATA_FILE):
-        return
-    
-    try:
-        with open(MAIN_DATA_FILE, 'r', encoding='utf-8') as f:
-            main_data = json.load(f)
-            st.session_state.tree_data = main_data.get("tree_data", {})
-            st.session_state.node_links = main_data.get("node_links", {})
-            st.session_state.generated_urls = main_data.get("generated_urls", {})
-            st.session_state.free_pages = main_data.get("free_pages", {})
-            st.session_state.canvas_data = main_data.get("canvas_data", {})
-    except Exception as e:
-        st.warning(f"データの読み込みに失敗しました: {e}")
-
-def save_task_data(task_id, task_data):
-    """業務詳細データを部署別フォルダに保存"""
-    if DATA_DIR is None:
-        return
-    
-    try:
-        # 部署パスからフォルダ構造を作成
-        dept_path = task_data.get("department_path", "")
-        if dept_path:
-            # スラッシュをアンダースコアに変換してフォルダ名として使用
-            folder_name = dept_path.replace("/", "_").replace(" ", "_")
-            task_folder = os.path.join(TASKS_DIR, folder_name)
-            os.makedirs(task_folder, exist_ok=True)
-            file_path = os.path.join(task_folder, f"{task_id}.json")
-        else:
-            file_path = os.path.join(TASKS_DIR, f"{task_id}.json")
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(task_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.warning(f"タスクデータの保存に失敗しました: {e}")
-
-def load_task_data(task_id):
-    """業務詳細データを読み込み"""
-    if DATA_DIR is None:
-        return None
-    
-    # 全フォルダから該当するタスクIDを検索
-    try:
-        for root, dirs, files in os.walk(TASKS_DIR):
-            for file in files:
-                if file == f"{task_id}.json":
-                    file_path = os.path.join(root, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            return json.load(f)
-                    except Exception as e:
-                        st.error(f"タスクデータの読み込みに失敗しました: {e}")
-                        return None
-    except Exception:
-        pass
-    return None
-
-def get_all_task_files():
-    """全ての業務詳細ファイルを部署別に取得"""
-    if DATA_DIR is None:
-        return {}
-    
-    task_files = {}
-    try:
-        for root, dirs, files in os.walk(TASKS_DIR):
-            for file in files:
-                if file.endswith('.json'):
-                    task_id = file[:-5]  # .jsonを除去
-                    dept_folder = os.path.basename(root)
-                    if dept_folder == "tasks":
-                        dept_folder = "未分類"
-                    if dept_folder not in task_files:
-                        task_files[dept_folder] = []
-                    task_files[dept_folder].append(task_id)
-    except Exception:
-        pass
-    return task_files
-
-# 初期データの読み込み
-if "data_loaded" not in st.session_state:
-    load_main_data()
-    st.session_state.data_loaded = True
+st.title("OpsMap™：組織構造 × 業務マッピング + セッション永続化")
 
 # セッション状態の初期化
 if "tree_data" not in st.session_state:
@@ -172,6 +31,9 @@ if "node_links" not in st.session_state:
 
 if "generated_urls" not in st.session_state:
     st.session_state.generated_urls = {}
+
+if "task_details" not in st.session_state:
+    st.session_state.task_details = {}
 
 tree = st.session_state.tree_data
 
@@ -244,8 +106,8 @@ def generate_task_url(node_path):
             "時間目安": node.get("時間目安", 0.0)
         })
     
-    # データを保存
-    save_task_data(task_id, task_data)
+    # セッション状態に保存
+    st.session_state.task_details[task_id] = task_data
     
     # 生成されたURLを保存
     st.session_state.generated_urls[node_path] = {
@@ -254,15 +116,30 @@ def generate_task_url(node_path):
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # メインデータを保存
-    save_main_data()
-    
     return generated_url, task_id
+
+def get_all_task_files():
+    """全ての業務詳細を部署別に取得"""
+    task_files = {}
+    
+    for task_id, task_data in st.session_state.task_details.items():
+        dept_path = task_data.get("department_path", "")
+        if dept_path:
+            # スラッシュをアンダースコアに変換してフォルダ名として使用
+            folder_name = dept_path.replace("/", "_")
+        else:
+            folder_name = "未分類"
+        
+        if folder_name not in task_files:
+            task_files[folder_name] = []
+        task_files[folder_name].append(task_id)
+    
+    return task_files
 
 # 業務詳細ページの表示
 def show_task_detail_page(task_id):
     """固有URLを持つ業務詳細ページを表示"""
-    task_data = load_task_data(task_id)
+    task_data = st.session_state.task_details.get(task_id)
     
     if not task_data:
         st.error(f"タスクID {task_id} のデータが見つかりません。")
@@ -277,10 +154,7 @@ def show_task_detail_page(task_id):
     st.markdown(f"**作成日:** {task_data['created_at']} | **更新日:** {task_data['updated_at']}")
     
     # データ保存状況の表示
-    if DATA_DIR:
-        st.success(f"💾 データ保存場所: {DATA_DIR}")
-    else:
-        st.warning("⚠️ ファイル保存が無効です。セッション内でのみデータが保持されます。")
+    st.info("💾 データはセッション内で保持されます（ブラウザを閉じるまで有効）")
     
     # URL情報の表示
     with st.expander("🔗 このページのURL情報", expanded=False):
@@ -308,7 +182,6 @@ def show_task_detail_page(task_id):
                     "url": task_data['url'],
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
-                save_main_data()
                 st.success("ノードリンクに追加しました！")
     
     # 業務詳細フォーム
@@ -356,9 +229,8 @@ def show_task_detail_page(task_id):
                     "時間目安": new_estimate
                 })
             
-            # データを保存
-            save_task_data(task_id, task_data)
-            save_main_data()
+            # セッション状態を更新
+            st.session_state.task_details[task_id] = task_data
             
             st.success("✅ 保存しました。")
             st.rerun()
@@ -385,7 +257,7 @@ def show_task_detail_page(task_id):
                         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
                     
-                    save_task_data(task_id, task_data)
+                    st.session_state.task_details[task_id] = task_data
                     st.success(f"リンク「{link_title}」を追加しました！")
                     st.rerun()
     
@@ -400,7 +272,7 @@ def show_task_detail_page(task_id):
             with col3:
                 if st.button("🗑️", key=f"delete_task_link_{i}"):
                     task_data["関連リンク"].pop(i)
-                    save_task_data(task_id, task_data)
+                    st.session_state.task_details[task_id] = task_data
                     st.rerun()
     
     # ナビゲーションボタン
@@ -437,7 +309,7 @@ def show_task_list_page():
         
         with st.expander(f"📁 {dept_name} ({len(task_ids)}件)", expanded=True):
             for task_id in task_ids:
-                task_data = load_task_data(task_id)
+                task_data = st.session_state.task_details.get(task_id)
                 if task_data:
                     col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
                     
@@ -563,7 +435,6 @@ def show_main_page():
                     node["業務"] = new_task
                     node["頻度"] = new_freq
                     node["重要度"] = new_imp
-                    save_main_data()
                     st.success("✅ 保存しました。")
 
             # ボタン配置
@@ -586,7 +457,6 @@ def show_main_page():
                         parent = tree
                     if isinstance(parent, dict):
                         parent[new_dept] = {}
-                        save_main_data()
                         st.success(f"部署「{new_dept}」を追加しました。")
                         st.rerun()
 
@@ -599,7 +469,6 @@ def show_main_page():
                         dept_node = get_node_by_path(target_dept_path.split("/"), tree)
                         if isinstance(dept_node, dict):
                             dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
-                            save_main_data()
                             st.success(f"業務「{new_task_name}」を追加しました。")
                             st.rerun()
 
@@ -657,8 +526,10 @@ def show_main_page():
 1. 左のサイドバーから「部署の追加」で組織構造を作成
 2. 「業務の追加」で各部署に業務を追加
 3. 業務をクリックして「📄 詳細ページ作成」で固有URLの詳細ページを作成
-4. 詳細ページでは永続化されたデータの編集・保存が可能
-5. 「📋 全業務一覧」で部署別に整理された業務一覧を確認"""
+4. 詳細ページではセッション内でデータの編集・保存が可能
+5. 「📋 全業務一覧」で部署別に整理された業務一覧を確認
+
+**注意**: データはセッション内でのみ保持されます（ブラウザを閉じるまで有効）"""
             st.markdown(help_text)
 
 # メイン処理
