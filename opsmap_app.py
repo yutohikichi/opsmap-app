@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 st.set_page_config(page_title="OpsMap Enhanced", layout="wide")
-st.title("OpsMap™：組織構造 × 業務マッピング + 自由描画・ページ作成")
+st.title("OpsMap™：組織構造 × 業務マッピング + リンク機能")
 
 # 初期データ
 if "tree_data" not in st.session_state:
@@ -24,6 +24,9 @@ if "free_pages" not in st.session_state:
 
 if "canvas_data" not in st.session_state:
     st.session_state.canvas_data = {}
+
+if "node_links" not in st.session_state:
+    st.session_state.node_links = {}
 
 tree = st.session_state.tree_data
 
@@ -63,7 +66,11 @@ def show_page_navigation():
         st.session_state.selected_node = None
         st.rerun()
     
-    if st.sidebar.button("🎨 自由描画ツール"):
+    if st.sidebar.button("🔗 ノードリンク管理"):
+        st.session_state.current_page = "link_management"
+        st.rerun()
+    
+    if st.sidebar.button("🎨 自由描画メモ"):
         st.session_state.current_page = "drawing"
         st.rerun()
     
@@ -79,92 +86,160 @@ def show_page_navigation():
                 st.session_state.current_page = f"view_page_{page_id}"
                 st.rerun()
 
-# 自由描画ツールページ
-def show_drawing_tool():
-    st.subheader("🎨 自由描画ツール")
+# ノードリンク管理機能
+def show_link_management():
+    st.subheader("🔗 ノードリンク管理")
     
-    try:
-        from streamlit_drawable_canvas import st_canvas
+    # 既存ノード一覧の取得
+    all_nodes = []
+    
+    def collect_all_nodes(tree, path=""):
+        for key, val in tree.items():
+            current_path = f"{path}/{key}" if path else key
+            all_nodes.append(current_path)
+            if isinstance(val, dict) and not ("業務" in val):
+                collect_all_nodes(val, current_path)
+    
+    if tree:
+        collect_all_nodes(tree)
+    
+    if not all_nodes:
+        st.info("まず組織マップで部署や業務を作成してください。")
+        return
+    
+    # リンク追加・編集
+    with st.expander("➕ ノードにリンクを追加/編集", expanded=True):
+        selected_node = st.selectbox("ノードを選択:", all_nodes)
         
-        # 描画設定
-        col1, col2 = st.columns([1, 3])
+        # 既存リンク情報の取得
+        existing_links = st.session_state.node_links.get(selected_node, [])
+        
+        st.markdown(f"**選択ノード:** `{selected_node}`")
+        
+        # 新しいリンクの追加
+        st.markdown("**🔗 新しいリンクを追加**")
+        col1, col2, col3 = st.columns([2, 2, 1])
         
         with col1:
-            drawing_mode = st.selectbox(
-                "描画ツール:", 
-                ("freedraw", "line", "rect", "circle", "transform", "polygon"),
-                help="描画モードを選択してください"
+            link_title = st.text_input("リンクタイトル:", key="new_link_title")
+        with col2:
+            link_url = st.text_input("URL:", key="new_link_url", 
+                                   placeholder="https://example.com")
+        with col3:
+            if st.button("➕ 追加"):
+                if link_title and link_url:
+                    if selected_node not in st.session_state.node_links:
+                        st.session_state.node_links[selected_node] = []
+                    
+                    st.session_state.node_links[selected_node].append({
+                        "title": link_title,
+                        "url": link_url,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    st.success(f"リンク「{link_title}」を追加しました！")
+                    st.rerun()
+                else:
+                    st.warning("リンクタイトルとURLを入力してください。")
+        
+        # 既存リンクの表示・管理
+        if existing_links:
+            st.markdown("**📋 既存のリンク**")
+            for i, link in enumerate(existing_links):
+                col1, col2, col3, col4 = st.columns([2, 3, 1, 1])
+                
+                with col1:
+                    st.write(f"**{link['title']}**")
+                with col2:
+                    st.write(f"[{link['url']}]({link['url']})")
+                with col3:
+                    if st.button("🌐 開く", key=f"open_{selected_node}_{i}"):
+                        st.markdown(f"[🔗 {link['title']}を新しいタブで開く]({link['url']})")
+                with col4:
+                    if st.button("🗑️", key=f"delete_{selected_node}_{i}"):
+                        st.session_state.node_links[selected_node].pop(i)
+                        if not st.session_state.node_links[selected_node]:
+                            del st.session_state.node_links[selected_node]
+                        st.rerun()
+    
+    # 全ノードのリンク一覧
+    if st.session_state.node_links:
+        st.subheader("📋 全ノードのリンク一覧")
+        
+        for node_path, links in st.session_state.node_links.items():
+            with st.expander(f"🔗 {node_path} ({len(links)}個のリンク)"):
+                for link in links:
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.write(f"**{link['title']}**")
+                    with col2:
+                        st.markdown(f"[{link['url']}]({link['url']}) *(追加日: {link['created_at']})*")
+
+# 自由描画メモツール（ライブラリ不要版）
+def show_drawing_tool():
+    st.subheader("🎨 自由描画メモツール")
+    
+    st.info("💡 このツールでは、描画のアイデアやスケッチの説明をテキストで記録できます。")
+    
+    # 描画メモ作成
+    with st.expander("➕ 新しい描画メモを作成", expanded=True):
+        memo_name = st.text_input("描画メモ名:", "新しい描画アイデア")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📝 描画内容・アイデア**")
+            drawing_description = st.text_area(
+                "描画の内容や構想を記述:", 
+                height=200,
+                placeholder="例：\n- 組織図の改善案\n- プロセスフローの設計\n- UI/UXのワイヤーフレーム\n- システム構成図のアイデア"
             )
-            
-            stroke_width = st.slider("線の太さ:", 1, 25, 3)
-            stroke_color = st.color_picker("線の色:", "#000000")
-            fill_color = st.color_picker("塗りつぶし色:", "#FF0000")
-            bg_color = st.color_picker("背景色:", "#FFFFFF")
-            
-            canvas_name = st.text_input("キャンバス名:", "新しい描画")
         
         with col2:
-            # キャンバス
-            canvas_result = st_canvas(
-                fill_color=f"rgba({int(fill_color[1:3], 16)}, {int(fill_color[3:5], 16)}, {int(fill_color[5:7], 16)}, 0.3)",
-                stroke_width=stroke_width,
-                stroke_color=stroke_color,
-                background_color=bg_color,
-                height=400,
-                width=600,
-                drawing_mode=drawing_mode,
-                key="drawing_canvas",
+            st.markdown("**🎯 目的・用途**")
+            purpose = st.text_area(
+                "この描画の目的や用途:",
+                height=100,
+                placeholder="例：会議での説明用、提案書への添付、チーム共有など"
+            )
+            
+            st.markdown("**🏷️ タグ・カテゴリ**")
+            tags = st.text_input(
+                "タグ（カンマ区切り）:",
+                placeholder="例：組織図,プロセス,UI設計"
             )
         
-        # 保存ボタンを描画設定の下に移動
-        with col1:
-            if st.button("💾 描画を保存"):
-                if canvas_name and canvas_result and canvas_result.json_data:
-                    st.session_state.canvas_data[canvas_name] = {
-                        "json_data": canvas_result.json_data,
-                        "image_data": canvas_result.image_data,
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    st.success(f"描画「{canvas_name}」を保存しました！")
-                elif not canvas_result or not canvas_result.json_data:
-                    st.warning("描画内容がありません。何か描いてから保存してください。")
-                else:
-                    st.warning("キャンバス名を入力してください。")
-        
-        # 保存済み描画一覧
-        if st.session_state.canvas_data:
-            st.subheader("💾 保存済み描画")
-            for name, data in st.session_state.canvas_data.items():
-                with st.expander(f"📊 {name} ({data['created_at']})"):
-                    if data.get("image_data") is not None:
-                        st.image(data["image_data"], caption=name)
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button(f"🗑️ 削除", key=f"del_{name}"):
-                            del st.session_state.canvas_data[name]
-                            st.rerun()
-                    with col2:
-                        if st.button(f"📋 復元", key=f"restore_{name}"):
-                            st.info("キャンバスに復元するには、上のキャンバスをリセットしてから実装予定です")
-    
-    except ImportError:
-        st.error("streamlit-drawable-canvasがインストールされていません。")
-        st.code("pip install streamlit-drawable-canvas")
-        st.info("代替として、テキストベースの描画メモ機能を提供します。")
-        
-        # 代替機能
-        st.subheader("📝 描画メモ")
-        drawing_memo = st.text_area("描画のアイデアやメモを記録:", height=200)
-        memo_name = st.text_input("メモ名:", "新しいメモ")
-        
-        if st.button("💾 メモを保存"):
-            if memo_name and drawing_memo:
+        if st.button("💾 描画メモを保存"):
+            if memo_name and drawing_description:
                 st.session_state.canvas_data[memo_name] = {
-                    "memo": drawing_memo,
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "description": drawing_description,
+                    "purpose": purpose,
+                    "tags": tags,
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "type": "memo"
                 }
-                st.success(f"メモ「{memo_name}」を保存しました！")
+                st.success(f"描画メモ「{memo_name}」を保存しました！")
+                st.rerun()
+            else:
+                st.warning("メモ名と描画内容を入力してください。")
+    
+    # 保存済み描画メモ一覧
+    if st.session_state.canvas_data:
+        st.subheader("💾 保存済み描画メモ")
+        
+        for name, data in st.session_state.canvas_data.items():
+            with st.expander(f"📊 {name} ({data['created_at']})"):
+                st.markdown(f"**描画内容:**")
+                st.write(data["description"])
+                
+                if data.get("purpose"):
+                    st.markdown(f"**目的:** {data['purpose']}")
+                
+                if data.get("tags"):
+                    st.markdown(f"**タグ:** {data['tags']}")
+                
+                if st.button(f"🗑️ 削除", key=f"del_memo_{name}"):
+                    del st.session_state.canvas_data[name]
+                    st.rerun()
 
 # 自由ページ作成機能
 def show_free_page_creator():
@@ -324,7 +399,7 @@ def show_free_page_editor(page_id):
                 st.session_state.current_page = f"view_page_{page_id}"
                 st.rerun()
 
-# メインの組織マップ機能（既存機能）
+# メインの組織マップ機能（リンク機能付き）
 def show_main_page():
     selected_node = st.session_state.get("selected_node")
 
@@ -334,6 +409,15 @@ def show_main_page():
 
         if isinstance(node, dict) and "業務" in node:
             st.subheader(f"📝 業務詳細ページ：「{clicked}」")
+
+            # ノードのリンク表示
+            node_links = st.session_state.node_links.get(clicked, [])
+            if node_links:
+                st.markdown("**🔗 関連リンク:**")
+                cols = st.columns(min(len(node_links), 3))
+                for i, link in enumerate(node_links):
+                    with cols[i % 3]:
+                        st.markdown(f"[🌐 {link['title']}]({link['url']})")
 
             task = node.get("業務", "")
             freq = node.get("頻度", "毎週")
@@ -355,103 +439,5 @@ def show_main_page():
                     node["重要度"] = new_imp
                     node["工数"] = new_effort
                     node["時間目安"] = new_estimate
-                    st.success("✅ 保存しました。")
-
-            if st.button("🔙 トップに戻る"):
-                st.session_state.selected_node = None
-                st.rerun()
-
-    else:
-        # サイドバーの設定（組織マップ用）
-        with st.sidebar:
-            st.subheader("➕ 部署の追加")
-            parent_path = st.selectbox("親部署を選択", [""] + flatten_tree(tree), key="add_parent")
-            new_dept = st.text_input("新しい部署名を入力", key="add_name")
-            if st.button("部署を追加する", key="add_button"):
-                if new_dept:
-                    if parent_path:
-                        parent = get_node_by_path(parent_path.split("/"), tree)
-                    else:
-                        parent = tree
-                    if isinstance(parent, dict):
-                        parent[new_dept] = {}
-                        st.success(f"部署「{new_dept}」を追加しました。")
-                        st.rerun()
-
-            st.subheader("🗑️ 部署の削除")
-            delete_path = st.selectbox("削除したい部署を選択", [""] + flatten_tree(tree), key="del_select")
-            if st.button("部署を削除する", key="delete_button"):
-                if delete_path:
-                    delete_node(tree, delete_path.split("/"))
-                    st.success(f"部署「{delete_path}」を削除しました。")
-                    st.rerun()
-
-            st.subheader("📄 業務の追加")
-            if flatten_tree(tree):
-                target_dept_path = st.selectbox("業務を追加する部署を選択", flatten_tree(tree), key="task_add_target")
-                new_task_name = st.text_input("業務名", key="task_add_name")
-                if st.button("業務を追加する", key="task_add_button"):
-                    if new_task_name and target_dept_path:
-                        dept_node = get_node_by_path(target_dept_path.split("/"), tree)
-                        if isinstance(dept_node, dict):
-                            dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
-                            st.success(f"業務「{new_task_name}」を追加しました。")
-                            st.rerun()
-
-        st.subheader("🧠 組織マップ（ツリー表示）")
-
-        def display_tree_interactive(tree, level=0, path=""):
-            for key, val in tree.items():
-                current_path = f"{path}/{key}" if path else key
-                indent = "　" * level
-                
-                if isinstance(val, dict) and "業務" in val:
-                    # 業務ノード - クリック可能なボタン
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        if st.button(f"📝 {key}", key=f"task_{current_path.replace('/', '_')}", help="クリックして詳細編集"):
-                            st.session_state.selected_node = current_path
-                            st.rerun()
-                    with col2:
-                        task_content = val.get("業務", "未設定")
-                        freq = val.get("頻度", "毎週")
-                        imp = val.get("重要度", 3)
-                        st.write(f"{indent}業務内容: {task_content[:50]}{'...' if len(task_content) > 50 else ''}")
-                        st.write(f"{indent}頻度: {freq}, 重要度: {imp}")
-                else:
-                    # 部署ノード
-                    st.write(f"{indent}◇ **{key}**")
-                    if isinstance(val, dict):
-                        display_tree_interactive(val, level + 1, current_path)
-
-        if tree:
-            display_tree_interactive(tree)
-        else:
-            st.info("まず部署を追加してください。")
-            help_text = """### 使い方
-1. 左のサイドバーから「部署の追加」で組織構造を作成
-2. 「業務の追加」で各部署に業務を追加
-3. ツリー表示の業務（📝ボタン）をクリックして詳細編集"""
-            st.markdown(help_text)
-
-# メイン処理
-show_page_navigation()
-
-# 現在のページに応じて表示を切り替え
-current_page = st.session_state.current_page
-
-if current_page == "main":
-    show_main_page()
-elif current_page == "drawing":
-    show_drawing_tool()
-elif current_page == "free_page":
-    show_free_page_creator()
-elif current_page.startswith("view_page_"):
-    page_id = current_page.replace("view_page_", "")
-    show_free_page(page_id)
-elif current_page.startswith("edit_page_"):
-    page_id = current_page.replace("edit_page_", "")
-    show_free_page_editor(page_id)
-else:
-    show_main_page()
-
+    
+(Content truncated due to size limit. Use line ranges to read in chunks)
