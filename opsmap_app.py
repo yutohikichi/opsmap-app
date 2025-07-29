@@ -4,89 +4,143 @@ import json
 import os
 from datetime import datetime
 import uuid
-import pickle
+import tempfile
+import shutil
 
 st.set_page_config(page_title="OpsMap Enhanced", layout="wide")
 st.title("OpsMap™：組織構造 × 業務マッピング + 永続化機能")
 
-# データ保存用ディレクトリの設定
-DATA_DIR = "/home/ubuntu/opsmap_data"
+# データ保存用ディレクトリの設定（権限エラーを回避）
+def get_data_directory():
+    """適切なデータディレクトリを取得"""
+    try:
+        # まず現在のディレクトリに作成を試行
+        current_dir = os.getcwd()
+        data_dir = os.path.join(current_dir, "opsmap_data")
+        os.makedirs(data_dir, exist_ok=True)
+        return data_dir
+    except PermissionError:
+        try:
+            # ホームディレクトリに作成を試行
+            home_dir = os.path.expanduser("~")
+            data_dir = os.path.join(home_dir, "opsmap_data")
+            os.makedirs(data_dir, exist_ok=True)
+            return data_dir
+        except PermissionError:
+            # 一時ディレクトリを使用
+            temp_dir = tempfile.gettempdir()
+            data_dir = os.path.join(temp_dir, "opsmap_data")
+            os.makedirs(data_dir, exist_ok=True)
+            return data_dir
+
+DATA_DIR = get_data_directory()
 TASKS_DIR = os.path.join(DATA_DIR, "tasks")
-MAIN_DATA_FILE = os.path.join(DATA_DIR, "main_data.pkl")
+MAIN_DATA_FILE = os.path.join(DATA_DIR, "main_data.json")
 
 # ディレクトリの作成
-os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(TASKS_DIR, exist_ok=True)
+try:
+    os.makedirs(TASKS_DIR, exist_ok=True)
+except PermissionError:
+    st.error("データ保存ディレクトリの作成に失敗しました。セッション内でのみデータが保持されます。")
+    DATA_DIR = None
 
 # データの永続化関数
 def save_main_data():
     """メインデータ（組織構造、リンクなど）を保存"""
-    main_data = {
-        "tree_data": st.session_state.tree_data,
-        "node_links": st.session_state.node_links,
-        "generated_urls": st.session_state.generated_urls,
-        "free_pages": st.session_state.free_pages,
-        "canvas_data": st.session_state.canvas_data
-    }
-    with open(MAIN_DATA_FILE, 'wb') as f:
-        pickle.dump(main_data, f)
+    if DATA_DIR is None:
+        return
+    
+    try:
+        main_data = {
+            "tree_data": st.session_state.tree_data,
+            "node_links": st.session_state.node_links,
+            "generated_urls": st.session_state.generated_urls,
+            "free_pages": st.session_state.free_pages,
+            "canvas_data": st.session_state.canvas_data
+        }
+        with open(MAIN_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(main_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.warning(f"データの保存に失敗しました: {e}")
 
 def load_main_data():
     """メインデータを読み込み"""
-    if os.path.exists(MAIN_DATA_FILE):
-        try:
-            with open(MAIN_DATA_FILE, 'rb') as f:
-                main_data = pickle.load(f)
-                st.session_state.tree_data = main_data.get("tree_data", {})
-                st.session_state.node_links = main_data.get("node_links", {})
-                st.session_state.generated_urls = main_data.get("generated_urls", {})
-                st.session_state.free_pages = main_data.get("free_pages", {})
-                st.session_state.canvas_data = main_data.get("canvas_data", {})
-        except Exception as e:
-            st.error(f"データの読み込みに失敗しました: {e}")
+    if DATA_DIR is None or not os.path.exists(MAIN_DATA_FILE):
+        return
+    
+    try:
+        with open(MAIN_DATA_FILE, 'r', encoding='utf-8') as f:
+            main_data = json.load(f)
+            st.session_state.tree_data = main_data.get("tree_data", {})
+            st.session_state.node_links = main_data.get("node_links", {})
+            st.session_state.generated_urls = main_data.get("generated_urls", {})
+            st.session_state.free_pages = main_data.get("free_pages", {})
+            st.session_state.canvas_data = main_data.get("canvas_data", {})
+    except Exception as e:
+        st.warning(f"データの読み込みに失敗しました: {e}")
 
 def save_task_data(task_id, task_data):
     """業務詳細データを部署別フォルダに保存"""
-    # 部署パスからフォルダ構造を作成
-    dept_path = task_data.get("department_path", "")
-    if dept_path:
-        # スラッシュをアンダースコアに変換してフォルダ名として使用
-        folder_name = dept_path.replace("/", "_")
-        task_folder = os.path.join(TASKS_DIR, folder_name)
-        os.makedirs(task_folder, exist_ok=True)
-        file_path = os.path.join(task_folder, f"{task_id}.json")
-    else:
-        file_path = os.path.join(TASKS_DIR, f"{task_id}.json")
+    if DATA_DIR is None:
+        return
     
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(task_data, f, ensure_ascii=False, indent=2)
+    try:
+        # 部署パスからフォルダ構造を作成
+        dept_path = task_data.get("department_path", "")
+        if dept_path:
+            # スラッシュをアンダースコアに変換してフォルダ名として使用
+            folder_name = dept_path.replace("/", "_").replace(" ", "_")
+            task_folder = os.path.join(TASKS_DIR, folder_name)
+            os.makedirs(task_folder, exist_ok=True)
+            file_path = os.path.join(task_folder, f"{task_id}.json")
+        else:
+            file_path = os.path.join(TASKS_DIR, f"{task_id}.json")
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(task_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.warning(f"タスクデータの保存に失敗しました: {e}")
 
 def load_task_data(task_id):
     """業務詳細データを読み込み"""
+    if DATA_DIR is None:
+        return None
+    
     # 全フォルダから該当するタスクIDを検索
-    for root, dirs, files in os.walk(TASKS_DIR):
-        for file in files:
-            if file == f"{task_id}.json":
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        return json.load(f)
-                except Exception as e:
-                    st.error(f"タスクデータの読み込みに失敗しました: {e}")
-                    return None
+    try:
+        for root, dirs, files in os.walk(TASKS_DIR):
+            for file in files:
+                if file == f"{task_id}.json":
+                    file_path = os.path.join(root, file)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            return json.load(f)
+                    except Exception as e:
+                        st.error(f"タスクデータの読み込みに失敗しました: {e}")
+                        return None
+    except Exception:
+        pass
     return None
 
 def get_all_task_files():
     """全ての業務詳細ファイルを部署別に取得"""
+    if DATA_DIR is None:
+        return {}
+    
     task_files = {}
-    for root, dirs, files in os.walk(TASKS_DIR):
-        for file in files:
-            if file.endswith('.json'):
-                task_id = file[:-5]  # .jsonを除去
-                dept_folder = os.path.basename(root)
-                if dept_folder not in task_files:
-                    task_files[dept_folder] = []
-                task_files[dept_folder].append(task_id)
+    try:
+        for root, dirs, files in os.walk(TASKS_DIR):
+            for file in files:
+                if file.endswith('.json'):
+                    task_id = file[:-5]  # .jsonを除去
+                    dept_folder = os.path.basename(root)
+                    if dept_folder == "tasks":
+                        dept_folder = "未分類"
+                    if dept_folder not in task_files:
+                        task_files[dept_folder] = []
+                    task_files[dept_folder].append(task_id)
+    except Exception:
+        pass
     return task_files
 
 # 初期データの読み込み
@@ -221,6 +275,12 @@ def show_task_detail_page(task_id):
     st.subheader(f"📝 業務詳細ページ：「{task_data['task_name']}」")
     st.markdown(f"**部署:** {task_data['department_path']}")
     st.markdown(f"**作成日:** {task_data['created_at']} | **更新日:** {task_data['updated_at']}")
+    
+    # データ保存状況の表示
+    if DATA_DIR:
+        st.success(f"💾 データ保存場所: {DATA_DIR}")
+    else:
+        st.warning("⚠️ ファイル保存が無効です。セッション内でのみデータが保持されます。")
     
     # URL情報の表示
     with st.expander("🔗 このページのURL情報", expanded=False):
@@ -373,7 +433,7 @@ def show_task_list_page():
     
     for dept_folder, task_ids in task_files.items():
         # 部署名を表示（アンダースコアをスラッシュに戻す）
-        dept_name = dept_folder.replace("_", "/") if dept_folder != "tasks" else "未分類"
+        dept_name = dept_folder.replace("_", "/") if dept_folder != "未分類" else "未分類"
         
         with st.expander(f"📁 {dept_name} ({len(task_ids)}件)", expanded=True):
             for task_id in task_ids:
@@ -411,14 +471,6 @@ def show_page_navigation():
     
     if st.sidebar.button("🔗 ノードリンク管理"):
         st.session_state.current_page = "link_management"
-        st.rerun()
-    
-    if st.sidebar.button("🎨 自由描画メモ"):
-        st.session_state.current_page = "drawing"
-        st.rerun()
-    
-    if st.sidebar.button("📝 自由ページ作成"):
-        st.session_state.current_page = "free_page"
         st.rerun()
 
 # ノードリンク管理機能（簡略版）
