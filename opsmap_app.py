@@ -17,9 +17,6 @@ if "layout_direction" not in st.session_state:
 if "selected_node" not in st.session_state:
     st.session_state.selected_node = None
 
-if "page_refresh" not in st.session_state:
-    st.session_state.page_refresh = 0
-
 tree = st.session_state.tree_data
 
 # -----------------------
@@ -49,9 +46,6 @@ def delete_node(tree, path_list):
     else:
         if path_list[0] in tree:
             delete_node(tree[path_list[0]], path_list[1:])
-
-def refresh_page():
-    st.session_state.page_refresh += 1
 
 # -----------------------
 # ページ切り替えチェック
@@ -89,7 +83,6 @@ if selected_node:
 
         if st.button("🔙 トップに戻る"):
             st.session_state.selected_node = None
-            refresh_page()
             st.rerun()
 
 else:
@@ -107,7 +100,6 @@ else:
                 if isinstance(parent, dict):
                     parent[new_dept] = {}
                     st.success(f"部署「{new_dept}」を追加しました。")
-                    refresh_page()
                     st.rerun()
 
         st.subheader("🗑️ 部署の削除")
@@ -116,7 +108,6 @@ else:
             if delete_path:
                 delete_node(tree, delete_path.split("/"))
                 st.success(f"部署「{delete_path}」を削除しました。")
-                refresh_page()
                 st.rerun()
 
         st.subheader("📄 業務の追加")
@@ -129,7 +120,6 @@ else:
                     if isinstance(dept_node, dict):
                         dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
                         st.success(f"業務「{new_task_name}」を追加しました。")
-                        refresh_page()
                         st.rerun()
 
         st.subheader("🧭 表示形式")
@@ -141,7 +131,6 @@ else:
         new_direction = "vertical" if layout_choice == "縦展開" else "horizontal"
         if new_direction != st.session_state.layout_direction:
             st.session_state.layout_direction = new_direction
-            refresh_page()
             st.rerun()
 
     st.subheader("🧠 組織マップ")
@@ -184,18 +173,22 @@ else:
                 hierarchical_direction=direction
             )
             
-            return_value = agraph(nodes=nodes, edges=edges, config=config, key=f"graph_{st.session_state.page_refresh}")
+            # key引数を削除してagraphを呼び出し
+            return_value = agraph(nodes=nodes, edges=edges, config=config)
 
             # ノードクリック処理
             if return_value:
+                clicked_id = None
+                
+                # 複数の属性名を試す（streamlit-agraphのバージョンによって異なる）
                 if hasattr(return_value, 'clicked_node_id') and return_value.clicked_node_id:
                     clicked_id = return_value.clicked_node_id
-                    node = get_node_by_path(clicked_id.split("/"), tree)
-                    if isinstance(node, dict) and "業務" in node:
-                        st.session_state.selected_node = clicked_id
-                        st.rerun()
                 elif hasattr(return_value, 'clicked') and return_value.clicked:
                     clicked_id = return_value.clicked
+                elif hasattr(return_value, 'node_id') and return_value.node_id:
+                    clicked_id = return_value.node_id
+                
+                if clicked_id:
                     node = get_node_by_path(clicked_id.split("/"), tree)
                     if isinstance(node, dict) and "業務" in node:
                         st.session_state.selected_node = clicked_id
@@ -207,17 +200,18 @@ else:
             
             # フォールバック表示
             st.subheader("📋 組織構造（リスト表示）")
-            def display_tree_list(tree, level=0):
+            def display_tree_list(tree, level=0, path=""):
                 for key, val in tree.items():
+                    current_path = f"{path}/{key}" if path else key
                     indent = "　" * level
                     if isinstance(val, dict) and "業務" in val:
-                        if st.button(f"{indent}📝 {key}", key=f"list_{key}_{level}"):
-                            st.session_state.selected_node = key
+                        if st.button(f"{indent}📝 {key}", key=f"list_{current_path.replace('/', '_')}"):
+                            st.session_state.selected_node = current_path
                             st.rerun()
                     else:
                         st.write(f"{indent}◇ {key}")
                         if isinstance(val, dict):
-                            display_tree_list(val, level + 1)
+                            display_tree_list(val, level + 1, current_path)
             
             display_tree_list(tree)
     else:
@@ -227,4 +221,6 @@ else:
         1. 左のサイドバーから「部署の追加」で組織構造を作成
         2. 「業務の追加」で各部署に業務を追加
         3. マインドマップ上の業務（📝マーク）をクリックして詳細編集
+        """)
+
         """)
