@@ -1,81 +1,100 @@
 import streamlit as st
-from graphviz import Digraph
-from collections import defaultdict
+from streamlit_agraph import agraph, Node, Edge, Config
+
+st.set_page_config(page_title="OpsMap", layout="wide")
+st.title("OpsMap™：組織構造 × 業務マッピング")
 
 # 初期化
-if "departments" not in st.session_state:
-    st.session_state.departments = []
-if "tasks" not in st.session_state:
-    st.session_state.tasks = defaultdict(list)
+if "tree_data" not in st.session_state:
+    st.session_state.tree_data = {
+        "経営本部": {
+            "経理部": {"業務": ""},
+            "人事部": {"業務": ""}
+        }
+    }
 
-# ページ設定
-st.set_page_config(page_title="OpsMap™", layout="wide")
-st.title("🧠 OpsMap™ 組織構造 × 業務棚卸しツール")
+def flatten_tree(tree, prefix=""):
+    """階層構造をフラットにしてパスリストに"""
+    flat = []
+    for key, val in tree.items():
+        path = f"{prefix}/{key}" if prefix else key
+        flat.append(path)
+        if isinstance(val, dict):
+            flat.extend(flatten_tree(val, path))
+    return flat
 
-# 展開方向の選択
-direction = st.radio("🧭 マインドマップの展開方向", ["横展開", "縦展開"], horizontal=True)
-
-# マインドマップ描画関数
-def draw_mindmap(departments, direction="横展開"):
-    dot = Digraph()
-    dot.attr(rankdir="LR" if direction == "横展開" else "TB")
-    for dept in departments:
-        dot.node(dept["name"])
-    for dept in departments:
-        if dept["parent"]:
-            dot.edge(dept["parent"], dept["name"])
-    return dot
-
-# 部署登録フォーム
-with st.form("add_dept"):
-    st.subheader("🏢 部署を追加")
-    dept_name = st.text_input("部署名")
-    parent = st.selectbox("上位部署", ["（なし）"] + [d["name"] for d in st.session_state.departments])
-    submitted = st.form_submit_button("➕ 登録")
-    if submitted:
-        if dept_name and not any(d["name"] == dept_name for d in st.session_state.departments):
-            st.session_state.departments.append({
-                "name": dept_name,
-                "parent": None if parent == "（なし）" else parent
-            })
-            st.success(f"{dept_name} を追加しました ✅")
+def get_node_by_path(path_list, tree):
+    """パスリストに沿ってノード取得"""
+    for p in path_list:
+        if p in tree:
+            tree = tree[p]
         else:
-            st.warning("未入力または重複しています")
+            return None
+    return tree
 
-# 組織図表示
-if st.session_state.departments:
-    st.subheader("📌 組織マインドマップ")
-    st.graphviz_chart(draw_mindmap(st.session_state.departments, direction))
-else:
-    st.info("まずは部署を追加してください。")
+def delete_node(tree, path_list):
+    """パスリストに沿ってノード削除"""
+    if len(path_list) == 1:
+        tree.pop(path_list[0], None)
+    else:
+        delete_node(tree[path_list[0]], path_list[1:])
 
-# 業務入力欄
-st.subheader("📝 部署別の業務登録")
-for dept in st.session_state.departments:
-    with st.expander(f"📂 {dept['name']} の業務を登録"):
-        with st.form(f"task_form_{dept['name']}"):
-            task = st.text_input("業務名", key=f"task_{dept['name']}")
-            purpose = st.text_input("目的", key=f"purpose_{dept['name']}")
-            freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], key=f"freq_{dept['name']}")
-            effort = st.number_input("工数（時間/週）", min_value=0.0, max_value=168.0, step=0.5, key=f"effort_{dept['name']}")
-            importance = st.slider("重要度", 1, 5, 3, key=f"importance_{dept['name']}")
-            confirm = st.form_submit_button("✅ 業務を登録")
-            if confirm and task:
-                st.session_state.tasks[dept["name"]].append({
-                    "業務名": task,
-                    "目的": purpose,
-                    "頻度": freq,
-                    "工数": effort,
-                    "重要度": importance
-                })
-                st.success("業務を登録しました")
+# ツリーデータ取得
+tree_data = st.session_state.tree_data
 
-# 業務一覧
-st.subheader("📊 部署別の業務一覧")
-for dept, tasklist in st.session_state.tasks.items():
-    if tasklist:
-        st.markdown(f"### 🏷 {dept}")
-        for t in tasklist:
-            st.markdown(f"- **{t['業務名']}** | 目的: {t['目的']} | 頻度: {t['頻度']} | 工数: {t['工数']}h/週 | 重要度: {t['重要度']}")
+# サイドバー：部署追加
+st.sidebar.subheader("➕ 部署の追加")
+parent_path = st.sidebar.selectbox("親部署の選択", [""] + flatten_tree(tree_data))
+new_dept = st.sidebar.text_input("新しい部署名を入力")
+if st.sidebar.button("部署を追加する") and new_dept:
+    parent = get_node_by_path(parent_path.split("/") if parent_path else [], tree_data)
+    if parent is not None and isinstance(parent, dict):
+        parent[new_dept] = {"業務": ""}
+        st.sidebar.success(f"{new_dept} を追加しました。")
 
+# サイドバー：部署の削除
+st.sidebar.subheader("🗑️ 部署の削除")
+delete_path = st.sidebar.selectbox("削除したい部署を選択", [""] + flatten_tree(tree_data))
+if st.sidebar.button("部署を削除する") and delete_path:
+    delete_node(tree_data, delete_path.split("/"))
+    st.sidebar.success(f"{delete_path} を削除しました。")
 
+# サイドバー：業務の入力
+st.sidebar.subheader("📝 業務入力")
+select_path = st.sidebar.selectbox("部署の選択", [""] + flatten_tree(tree_data))
+if select_path:
+    node = get_node_by_path(select_path.split("/"), tree_data)
+    if node is not None and isinstance(node, dict):
+        current_task = node.get("業務", "")
+        new_task = st.sidebar.text_area("業務内容", current_task)
+        if st.sidebar.button("業務を保存"):
+            node["業務"] = new_task
+            st.sidebar.success("業務を更新しました。")
+
+# 可視化：マインドマップ
+st.subheader("🧠 組織マップ")
+
+def build_nodes_edges(tree, parent=None, path=""):
+    nodes, edges = [], []
+    for key, val in tree.items():
+        full_path = f"{path}/{key}" if path else key
+        label = f"{key}\n{val['業務']}" if isinstance(val, dict) and "業務" in val else key
+        node_id = full_path
+        nodes.append(Node(id=node_id, label=label, size=30))
+        if parent:
+            edges.append(Edge(source=parent, target=node_id))
+        if isinstance(val, dict):
+            subnodes, subedges = build_nodes_edges(val, node_id, full_path)
+            nodes.extend(subnodes)
+            edges.extend(subedges)
+    return nodes, edges
+
+nodes, edges = build_nodes_edges(tree_data)
+
+config = Config(width=1000,
+                height=700,
+                directed=True,
+                physics=True,
+                hierarchical=True)
+
+agraph(nodes=nodes, edges=edges, config=config)
