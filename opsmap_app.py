@@ -1,152 +1,100 @@
+# Streamlitアプリ試作版（FlowBuilder + 業務可視化アプリ）
 import streamlit as st
-from streamlit_agraph import agraph, Node, Edge, Config
-import urllib.parse
+import json
+import pandas as pd
+import plotly.express as px
+import os
 
-st.set_page_config(page_title="OpsMap", layout="wide")
-st.title("OpsMap™：組織構造 × 業務マッピング")
+st.set_page_config(page_title="BackOps360 FlowBuilder", layout="wide")
 
-# -----------------------
-# 初期データ
-# -----------------------
-if "tree_data" not in st.session_state:
-    st.session_state.tree_data = {}
+# ---------- ファイル保存/読み込みユーティリティ ----------
+FLOW_PATH = "flow_data.json"
 
-if "layout_direction" not in st.session_state:
-    st.session_state.layout_direction = "vertical"
-
-if "selected_node" not in st.session_state:
-    st.session_state.selected_node = None
-
-tree = st.session_state.tree_data
-
-# -----------------------
-# ユーティリティ関数
-# -----------------------
-def flatten_tree(tree, prefix=""):
-    flat = []
-    for key, val in tree.items():
-        path = f"{prefix}/{key}" if prefix else key
-        flat.append(path)
-        if isinstance(val, dict) and not ("業務" in val):
-            flat.extend(flatten_tree(val, path))
-    return flat
-
-def get_node_by_path(path_list, tree):
-    for p in path_list:
-        tree = tree.get(p, {})
-    return tree
-
-def delete_node(tree, path_list):
-    if len(path_list) == 1:
-        tree.pop(path_list[0], None)
+def load_flow():
+    if os.path.exists(FLOW_PATH):
+        with open(FLOW_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
     else:
-        delete_node(tree[path_list[0]], path_list[1:])
+        return {
+            "flow_id": "flow_001",
+            "flow_name": "請求書発行フロー",
+            "description": "請求内容確認から請求書送付までの流れ",
+            "nodes": [],
+            "connections": []
+        }
 
-# -----------------------
-# ページ切り替えチェック
-# -----------------------
-selected_node = st.session_state.get("selected_node")
+def save_flow(flow):
+    with open(FLOW_PATH, "w", encoding="utf-8") as f:
+        json.dump(flow, f, ensure_ascii=False, indent=2)
 
-if selected_node:
-    clicked = selected_node
-    node = get_node_by_path(clicked.split("/"), tree)
+flow = load_flow()
 
-    if isinstance(node, dict) and "業務" in node:
-        st.subheader(f"📝 業務詳細ページ：「{clicked}」")
+st.sidebar.title("🔧 Flow設定")
+flow["flow_name"] = st.sidebar.text_input("フロー名", value=flow["flow_name"])
+flow["description"] = st.sidebar.text_area("説明", value=flow["description"])
+if st.sidebar.button("💾 保存する"):
+    save_flow(flow)
+    st.sidebar.success("保存しました")
 
-        task = node.get("業務", "")
-        freq = node.get("頻度", "毎週")
-        imp = node.get("重要度", 3)
-        effort = node.get("工数", 0.0)
-        estimate = node.get("時間目安", 0.0)
+st.title("📘 BackOps360 FlowBuilder")
+st.caption("業務とスキルを可視化するバックオフィス支援アプリ")
 
-        new_task = st.text_area("業務内容", value=task, height=150)
-        new_freq = st.selectbox("頻度", ["毎日", "毎週", "毎月", "その他"], index=["毎日", "毎週", "毎月", "その他"].index(freq))
-        new_imp = st.slider("重要度 (1〜5)", 1, 5, value=imp)
-        new_effort = st.number_input("工数 (時間/週)", min_value=0.0, value=effort, step=0.5)
-        new_estimate = st.number_input("作業時間目安 (分/タスク)", min_value=0.0, value=estimate, step=5.0)
+st.subheader("📊 スキルマトリクス（業務 × スキル）")
+all_skills = sorted(set(skill for node in flow["nodes"] for skill in node.get("skills", [])))
+matrix_data = []
+for node in flow["nodes"]:
+    row = {"業務": node.get("label", "")}
+    for skill in all_skills:
+        row[skill] = "✅" if skill in node.get("skills", []) else ""
+    matrix_data.append(row)
+df_matrix = pd.DataFrame(matrix_data)
+st.dataframe(df_matrix, use_container_width=True)
 
-        if st.button("保存（業務詳細ページ）"):
-            node["業務"] = new_task
-            node["頻度"] = new_freq
-            node["重要度"] = new_imp
-            node["工数"] = new_effort
-            node["時間目安"] = new_estimate
-            st.success("✅ 保存しました。")
+st.subheader("📈 スキル別自己評価平均グラフ")
+skill_scores = {}
+skill_counts = {}
+for node in flow["nodes"]:
+    for skill in node.get("skills", []):
+        skill_scores[skill] = skill_scores.get(skill, 0) + node.get("self_rating", 0)
+        skill_counts[skill] = skill_counts.get(skill, 0) + 1
+avg_skill_ratings = {
+    skill: round(skill_scores[skill] / skill_counts[skill], 2)
+    for skill in skill_scores
+}
+df_avg = pd.DataFrame({
+    "スキル": list(avg_skill_ratings.keys()),
+    "平均評価": list(avg_skill_ratings.values())
+})
+fig_bar = px.bar(df_avg, x="スキル", y="平均評価", range_y=[0, 5])
+st.plotly_chart(fig_bar, use_container_width=True)
 
-        if st.button("🔙 トップに戻る"):
-            st.session_state.selected_node = None
-            st.rerun()
+st.subheader("📥 CSVエクスポート - 業務プロセスデータ")
+def flatten_node(node):
+    return {
+        "業務ID": node.get("node_id"),
+        "業務名": node.get("label"),
+        "種別": node.get("type"),
+        "詳細": node.get("details"),
+        "担当者": ", ".join(node.get("owners", [])),
+        "スキル": ", ".join(node.get("skills", [])),
+        "自己評価": node.get("self_rating", 0),
+        "工数(分)": node.get("effort", 0),
+        "頻度": node.get("frequency", ""),
+        "重要度": node.get("priority", 0),
+        "優先度スコア": node.get("effort", 0) * {
+            "月1回": 1, "週1回": 4, "毎日": 20
+        }.get(node.get("frequency", ""), 1) * node.get("priority", 0),
+        "担当者数": len(node.get("owners", []))
+    }
+df_nodes = pd.DataFrame([flatten_node(n) for n in flow["nodes"]])
 
-else:
-    st.sidebar.subheader("➕ 部署の追加")
-    parent_path = st.sidebar.selectbox("親部署を選択", [""] + flatten_tree(tree), key="add_parent")
-    new_dept = st.sidebar.text_input("新しい部署名を入力", key="add_name")
-    if st.sidebar.button("部署を追加する", key="add_button"):
-        if new_dept:
-            parent = get_node_by_path(parent_path.split("/") if parent_path else [], tree)
-            if isinstance(parent, dict):
-                parent[new_dept] = {}
-                st.sidebar.success(f"部署「{new_dept}」を追加しました。")
+st.subheader("📊 業務優先度 × 属人化リスクレーダーチャート")
+if not df_nodes.empty:
+    radar_data = df_nodes[["業務名", "優先度スコア", "担当者数"]].copy()
+    radar_data["属人化リスク"] = radar_data["担当者数"].apply(lambda x: 5 - min(x, 5))
+    radar_fig = px.line_polar(radar_data, r="優先度スコア", theta="業務名", line_close=True, name="優先度スコア")
+    radar_fig.add_barpolar(r=radar_data["属人化リスク"], theta=radar_data["業務名"], name="属人化リスク")
+    st.plotly_chart(radar_fig, use_container_width=True)
 
-    st.sidebar.subheader("🗑️ 部署の削除")
-    delete_path = st.sidebar.selectbox("削除したい部署を選択", [""] + flatten_tree(tree), key="del_select")
-    if st.sidebar.button("部署を削除する", key="delete_button"):
-        if delete_path:
-            delete_node(tree, delete_path.split("/"))
-            st.sidebar.success(f"部署「{delete_path}」を削除しました。")
-
-    st.sidebar.subheader("📄 業務の追加")
-    target_dept_path = st.sidebar.selectbox("業務を追加する部署を選択", flatten_tree(tree), key="task_add_target")
-    new_task_name = st.sidebar.text_input("業務名", key="task_add_name")
-    if st.sidebar.button("業務を追加する", key="task_add_button"):
-        if new_task_name:
-            dept_node = get_node_by_path(target_dept_path.split("/"), tree)
-            if isinstance(dept_node, dict):
-                dept_node[new_task_name] = {"業務": "", "頻度": "毎週", "重要度": 3, "工数": 0.0, "時間目安": 0.0}
-                st.sidebar.success(f"業務「{new_task_name}」を追加しました。")
-
-    st.sidebar.subheader("🧭 表示形式")
-    layout_choice = st.sidebar.radio("マインドマップの方向", ["縦展開", "横展開"], index=0)
-    if layout_choice == "縦展開":
-        st.session_state.layout_direction = "vertical"
-    else:
-        st.session_state.layout_direction = "horizontal"
-
-    st.subheader("🧠 組織マップ")
-
-    def build_nodes_edges(tree, parent=None, path=""):
-        nodes, edges = [], []
-        for key, val in tree.items():
-            full_path = f"{path}/{key}" if path else key
-
-            is_task_node = isinstance(val, dict) and "業務" in val
-            label = f"📝{key}" if is_task_node else f"◇{key}"
-            shape = "box" if is_task_node else "diamond"
-            size = 25 if is_task_node else 30
-
-            nodes.append(Node(id=full_path, label=label, shape=shape, size=size))
-            if parent:
-                edges.append(Edge(source=parent, target=full_path))
-
-            if isinstance(val, dict) and not ("業務" in val):
-                sn, se = build_nodes_edges(val, full_path)
-                nodes.extend(sn)
-                edges.extend(se)
-
-        return nodes, edges
-
-    nodes, edges = build_nodes_edges(tree)
-    hierarchical = True
-    direction = "UD" if st.session_state.layout_direction == "vertical" else "LR"
-    config = Config(width=1000, height=700, directed=True, physics=False, hierarchical=hierarchical, hierarchical_sort_method="directed", hierarchical_direction=direction)
-    return_value = agraph(nodes=nodes, edges=edges, config=config)
-
-    if return_value and return_value.clicked_node_id:
-        clicked_id = return_value.clicked_node_id
-        node = get_node_by_path(clicked_id.split("/"), tree)
-        if isinstance(node, dict) and "業務" in node:
-            st.session_state.selected_node = clicked_id
-            st.rerun()
-
-
+csv = df_nodes.to_csv(index=False).encode("utf-8")
+st.download_button("📤 CSVとしてダウンロード", data=csv, file_name="業務プロセス一覧.csv", mime="text/csv")
